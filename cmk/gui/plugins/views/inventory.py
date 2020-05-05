@@ -1136,7 +1136,6 @@ declare_invtable_view(
     _("Stack"),
     _("Stacks"),
 )
-
 declare_invtable_view(
     "invorainstance",
     ".software.applications.oracle.instance:",
@@ -1185,6 +1184,8 @@ declare_invtable_view("invibmmqchannels", ".software.applications.ibm_mq.channel
                       _("IBM MQ Channels"))
 declare_invtable_view("invibmmqqueues", ".software.applications.ibm_mq.queues:", _("Queue"),
                       _("IBM MQ Queues"))
+declare_invtable_view("invlogicalvolumes", ".hardware.storage.logical_volumes:",
+                      _("LogicalVolumes"), _("Logical Volumes per Volume Group"))
 declare_invtable_view("invtunnels", ".networking.tunnels:", _("Networking Tunnels"),
                       _("Networking Tunnels"))
 

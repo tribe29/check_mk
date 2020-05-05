@@ -1,0 +1,13 @@
+title: Mirror state of all LVM logical volumes on AIX
+agents: aix
+catalog: os/storage
+license: GPL
+distribution: check_mk
+description:
+ This check monitors the mirror state of LVM logical volumes of all volumegroups on AIX.
+
+item: 
+ Detailed infos for logical volumes per volume groups on AIX systems.
+
+inventory:
+ Shows the name, mountpoint, state, type, number of physical and logical partitions, and the number of physical volumes of the logical volume per volume group.

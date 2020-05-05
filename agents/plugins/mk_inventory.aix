@@ -50,5 +50,12 @@ then
         echo "<<<prtconf:sep(58):persist($UNTIL)>>>"
         prtconf
     fi
+    
+    if type lsvg > /dev/null; then
+        echo "<<<aix_lvgs:sep(0):persist($UNTIL)>>>"
+        echo "[Volume_Groups_Active]"
+        lsvg -o
+        echo "[Volume_Groups_Details]"
+        lsvg | lsvg -i -l -L 2>/dev/null
+    fi
 fi
-
