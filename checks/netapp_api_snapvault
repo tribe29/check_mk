@@ -28,6 +28,8 @@ def check_netapp_api_snapvault(item, params, snapvault):
         return
 
     lag_time = int(lag_time)
+    lag_time_minutes = int(lag_time / 60)
+    perfdata = [("lag_time_minutes", lag_time_minutes)]
     state = 0
     if params:
         levels = None
@@ -48,7 +50,11 @@ def check_netapp_api_snapvault(item, params, snapvault):
             elif lag_time >= warn:
                 state = 1
 
-    yield state, "Lag-Time: %s" % get_age_human_readable(lag_time)
+            warn_minutes = int(warn / 60)
+            crit_minutes = int(crit / 60)
+            perfdata = [("lag_time_minutes", lag_time_minutes, warn_minutes, crit_minutes)]
+
+    yield state, "Lag-Time: %s" % get_age_human_readable(lag_time), perfdata
 
 
 def netapp_api_snapvault_item(name, _values):
@@ -61,5 +67,6 @@ check_info["netapp_api_snapvault"] = {
     'inventory_function': inventory_netapp_api_snapvault,
     'group': "snapvault",
     'service_description': 'Snapvault %s',
+    'has_perfdata': True,
     'includes': ["netapp_api.include"]
 }
