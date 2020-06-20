@@ -15,6 +15,7 @@ from cmk.gui.valuespec import (
     TextAscii,
     Tuple,
     ListChoice,
+    ListOfStrings,
 )
 from cmk.gui.plugins.wato import (
     HostRulespec,
@@ -97,20 +98,29 @@ rulespec_registry.register(
 
 
 def _valuespec_discovery_cisco_dom_rules():
-    return Dictionary(title=_("Cisco DOM Discovery"),
-                      elements=[
-                          ("admin_states",
-                           ListChoice(
-                               title=_("Admin states to discover"),
-                               choices={
-                                   1: _("up"),
-                                   2: _("down"),
-                                   3: _("testing"),
-                               },
-                               toggle_all=True,
-                               default_value=['1', '2', '3'],
-                           )),
-                      ])
+    return Dictionary(
+        title=_("Cisco DOM Discovery"),
+        elements=[
+            ("admin_states",
+             ListChoice(
+                 title=_("Admin states to discover"),
+                 choices={
+                     1: _("up"),
+                     2: _("down"),
+                     3: _("testing"),
+                 },
+                 toggle_all=True,
+                 default_value=['1', '2', '3'],
+             )),
+            ("dom_blacklist",
+             ListOfStrings(
+                 title=_("DOMs to exclude by Partnumber."),
+                 help=
+                 _("Various DOMs do not provide correct temperature or damping values. You can exclude those by its partnumber from ENTITY-MIB (.1.3.6.1.2.1.47.1.1.1.1.13)"
+                  ),
+                 default_value=[],
+             )),
+        ])
 
 
 rulespec_registry.register(
