@@ -27,10 +27,20 @@ function do_query() {
 
   echo "<<<mysql_slave>>>"
   echo "$INSTANCE_HEADER"
+  # do not fail but output nothing if we do not have a slave or do not have the required permission
   mysql --defaults-extra-file="$MK_CONFDIR"/mysql.cfg ${1:+--socket="$1"} -s \
-     -e "show slave status\G"
-
+     -e "show slave status\G" || :
 }
+
+# if mysqladmin is not retrievable via PATH try to receive mysql home from mysqld process
+if ! type mysqladmin >/dev/null 2>&1
+then
+  mysql_bin=$(ps -C mysqld -o cmd | grep -v CMD | awk '{print $1}')
+  if [ -n "${mysql_bin}" ]
+  then
+    PATH=${PATH}:$(dirname "${mysql_bin}")
+  fi
+fi
 
 if type mysqladmin >/dev/null
 then
@@ -50,5 +60,4 @@ then
       fi
     done
   fi
-
 fi
