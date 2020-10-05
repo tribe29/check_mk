@@ -7,6 +7,7 @@ CLANG_VERSION ?= 10
 CPPCHECK ?= cppcheck
 CPPCHECK_NEB_RESULT ?= cppcheck-result.xml
 DOXYGEN ?= doxygen
+PLANTUTML_VERSION ?= 1.2020.16
 IWYU_TOOL ?= $(abs_top_srcdir)/scripts/iwyu_tool
 RUN_CLANG_TIDY ?= \
     $(abs_top_srcdir)/scripts/run-clang-tidy.py \
@@ -56,8 +57,8 @@ test_neb_SOURCES = \
     test/test_CustomVarsDictFilter.cc \
     test/test_FileSystemHelper.cc \
     test/test_LogEntry.cc \
+    test/test_MacroExpander.cc \
     test/test_Metric.cc \
-    test/test_OffsetStringMacroColumn.cc \
     test/test_Queue.cc \
     test/test_RegExp.cc \
     test/test_StringUtil.cc \
@@ -103,7 +104,6 @@ liblivestatus_a_SOURCES = \
         ContactGroupsColumn.cc \
         CountAggregator.cc \
         CrashReport.cc \
-        CustomTimeperiodColumn.cc \
         CustomVarsDictColumn.cc \
         CustomVarsDictFilter.cc \
         CustomVarsExplicitColumn.cc \
@@ -116,13 +116,13 @@ liblivestatus_a_SOURCES = \
         DowntimesOrComments.cc \
         DynamicColumn.cc \
         DynamicEventConsoleReplicationColumn.cc \
-        DynamicHostFileColumn-impl.cc \
+        DynamicFileColumn-impl.cc \
         DynamicRRDColumn.cc \
         EventConsoleConnection.cc \
+        FileColumn-impl.cc \
         FileSystemHelper.cc \
         Filter.cc \
         HostContactsColumn.cc \
-        HostFileColumn-impl.cc \
         HostGroupsColumn.cc \
         HostListColumn.cc \
         HostListStateColumn.cc \
@@ -140,12 +140,10 @@ liblivestatus_a_SOURCES = \
         Logfile.cc \
         Logger.cc \
         LogwatchListColumn.cc \
+        MacroExpander.cc \
         Metric.cc \
         NagiosCore.cc \
         NullColumn.cc \
-        OffsetStringHostMacroColumn.cc \
-        OffsetStringMacroColumn.cc \
-        OffsetStringServiceMacroColumn.cc \
         OringFilter.cc \
         OutputBuffer.cc \
         PerfdataAggregator.cc \
@@ -197,7 +195,6 @@ liblivestatus_a_SOURCES = \
         TableTimeperiods.cc \
         TimeColumn.cc \
         TimeFilter.cc \
-        TimeperiodColumn.cc \
         TimeperiodsCache.cc \
         Triggers.cc \
         auth.cc \
@@ -285,8 +282,11 @@ cppcheck-xml: compile_commands.json
 	$(CPPCHECK) -UCMC --enable=all --suppressions-list=$(abs_top_srcdir)/.cppcheck-suppressions --inline-suppr --project=compile_commands.json --quiet --template=gcc --xml --xml-version=2 2> $(CPPCHECK_NEB_RESULT)
 	sed -i "s%\\(<location.* file=\"\\)\\([^/]\\)%\\1$(subdir)/\\2%" $(CPPCHECK_NEB_RESULT)
 
-documentation:
+documentation: doc/plantuml.jar
 	$(DOXYGEN) doc/Doxyfile
+
+doc/plantuml.jar:
+	wget https://master.dl.sourceforge.net/project/plantuml/$(PLANTUTML_VERSION)/plantuml.$(PLANTUTML_VERSION).jar -O $@
 
 all-local: livestatus.o
 

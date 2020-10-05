@@ -5,7 +5,7 @@
 # conditions defined in the file COPYING, which is part of this source code package.
 
 from typing import Generator, Mapping, Union
-from .agent_based_api.v0 import (
+from .agent_based_api.v1 import (
     check_levels,
     clusterize,
     Metric,
@@ -68,15 +68,15 @@ def cluster_check_pulse_secure_users(
 
     for node_name, section_node in section.items():
         n_users_total += section_node['n_users']
-        node_details = clusterize.aggregate_node_details(
+        node_state, node_text = clusterize.aggregate_node_details(
             node_name,
             check_pulse_secure_users(
                 type_defs.Parameters({}),
                 section_node,
             ),
         )
-        if node_details:
-            yield node_details
+        if node_text:
+            yield Result(state=node_state, notice=node_text)
 
     yield from check_levels(
         n_users_total,

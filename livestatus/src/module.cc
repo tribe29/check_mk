@@ -213,9 +213,16 @@ void *main_thread(void *data) {
         if (cc > g_max_fd_ever) {
             g_max_fd_ever = cc;
         }
-        if (!fl_client_queue->try_push(cc)) {
-            generic_error ge("cannot enqueue client socket");
-            Warning(logger) << ge;
+        switch (
+            fl_client_queue->push(cc, queue_overflow_strategy::pop_oldest)) {
+            case queue_status::overflow:
+            case queue_status::joinable: {
+                generic_error ge("cannot enqueue client socket");
+                Warning(logger) << ge;
+                break;
+            }
+            case queue_status::ok:
+                break;
         }
         g_num_queued_connections++;
         counterIncrement(Counter::connections);
@@ -833,9 +840,12 @@ void livestatus_parse_arguments(Logger *logger, const char *args_orig) {
                 }
             } else if (left == "pnp_path") {
                 fl_paths._pnp = check_path("PNP perfdata directory", right);
-            } else if (left == "crash_report_path") {
+            } else if (left == "crash_reports_path") {
                 fl_paths._crash_reports_path =
                     check_path("Path to the crash reports", right);
+            } else if (left == "license_usage_history_path") {
+                fl_paths._license_usage_history_path =
+                    check_path("Path to the license usage", right);
             } else if (left == "mk_inventory_path") {
                 fl_paths._mk_inventory =
                     check_path("Check_MK Inventory directory", right);

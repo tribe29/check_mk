@@ -95,7 +95,7 @@ class ModeDiagHost(WatoMode):
                             title=_("Host properties"),
                             entries=[
                                 PageMenuEntry(
-                                    title=_("Save & Exit"),
+                                    title=_("Save & go to host properties"),
                                     icon_name="save",
                                     item=make_form_submit_link("diag_host", "_save"),
                                     is_shortcut=True,
@@ -220,6 +220,11 @@ class ModeDiagHost(WatoMode):
         html.help(vs_rules.help())
         forms.end()
 
+        # When clicking "Save & Test" on the "Edit host" page, this will be set
+        # to immediately execute the tests using the just saved settings
+        if html.request.has_var("_start_on_load"):
+            html.final_javascript("cmk.page_menu.form_submit('diag_host', '_try');")
+
         html.hidden_fields()
         html.end_form()
 
@@ -252,10 +257,10 @@ class ModeDiagHost(WatoMode):
 
             html.open_td(class_="icons")
             html.open_div()
-            html.icon(title=None, icon="reload", id_="%s_img" % ident)
+            html.icon("reload", id_="%s_img" % ident)
             html.open_a(href="")
-            html.icon(title=_('Retry this test'),
-                      icon="reload",
+            html.icon("reload",
+                      title=_('Retry this test'),
                       cssclass="retry",
                       id_="%s_retry" % ident)
             html.close_a()
@@ -325,7 +330,7 @@ class ModeDiagHost(WatoMode):
                     minvalue = 1,
                     maxvalue = 65535,
                     default_value = 6556,
-                    title = _("Check_MK Agent Port (<a href=\"%s\">Rules</a>)") %
+                    title = _("Checkmk Agent Port (<a href=\"%s\">Rules</a>)") %
                         watolib.folder_preserving_link([('mode', 'edit_ruleset'), ('varname', 'agent_ports')]),
                     help = _("This variable allows to specify the TCP port to "
                              "be used to connect to the agent on a per-host-basis.")

@@ -20,11 +20,11 @@ class SidebarSnapinCMAWebconf(SidebarSnapin):
 
     @classmethod
     def title(cls):
-        return _("Check_MK Appliance")
+        return _("Checkmk Appliance")
 
     @classmethod
     def description(cls):
-        return _("Access to the Check_MK Appliance Web Configuration")
+        return _("Access to the Checkmk Appliance Web Configuration")
 
     @classmethod
     def allowed_roles(cls):
@@ -50,7 +50,7 @@ class SidebarSnapinCMAWebconf(SidebarSnapin):
     # Our version of iconlink -> the images are located elsewhere
     def _iconlink(self, text, url, icon):
         html.open_a(class_=["iconlink", "link"], target="main", href=url)
-        html.icon(icon="/webconf/images/icon_%s.png" % icon, title=None, cssclass="inline")
+        html.icon("/webconf/images/icon_%s.png" % icon, cssclass="inline")
         html.write(text)
         html.close_a()
         html.br()

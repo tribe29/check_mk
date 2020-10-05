@@ -348,8 +348,7 @@ def get_role_permissions() -> Dict[str, List[str]]:
     """Returns the set of permissions for all roles"""
     role_permissions: Dict[str, List[str]] = {}
     roleids = set(roles.keys())
-    for perm_class in permissions.permission_registry.values():
-        perm = perm_class()
+    for perm in permissions.permission_registry.values():
         for role_id in roleids:
             if role_id not in role_permissions:
                 role_permissions[role_id] = []
@@ -377,7 +376,7 @@ def _may_with_roles(some_role_ids: List[str], pname: str) -> bool:
                 base_role_id = role_id
             if pname not in permissions.permission_registry:
                 return False  # Permission unknown. Assume False. Functionality might be missing
-            perm = permissions.permission_registry[pname]()
+            perm = permissions.permission_registry[pname]
             he_may = base_role_id in perm.defaults
         if he_may:
             return True
@@ -730,7 +729,7 @@ class LoggedInUser:
 
     def need_permission(self, pname: str) -> None:
         if not self.may(pname):
-            perm = permissions.permission_registry[pname]()
+            perm = permissions.permission_registry[pname]
             raise MKAuthException(
                 _("We are sorry, but you lack the permission "
                   "for this operation. If you do not like this "
@@ -1164,7 +1163,7 @@ def load_plugins(force: bool) -> None:
         roles.setdefault(br, {})
 
 
-def theme_choices() -> List[Tuple[str, Any]]:
+def theme_choices() -> List[Tuple[str, str]]:
     themes = {}
 
     for base_dir in [Path(cmk.utils.paths.web_dir), cmk.utils.paths.local_web_dir]:
@@ -1188,6 +1187,7 @@ def theme_choices() -> List[Tuple[str, Any]]:
                     "title": theme_dir.name,
                 }
 
+            assert isinstance(theme_meta["title"], str)
             themes[theme_dir.name] = theme_meta["title"]
 
     return sorted(themes.items())

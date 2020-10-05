@@ -7,6 +7,7 @@
 """
 from typing import Any, Callable, Dict, Generator, List, Optional, Tuple, Union
 import copy
+from contextlib import suppress
 import functools
 import itertools
 
@@ -15,17 +16,18 @@ from cmk.utils.check_utils import maincheckify, wrap_parameters, unwrap_paramete
 from cmk.base import item_state
 from cmk.base.api.agent_based.checking_classes import (
     Metric,
-    state,
     Result,
     Service,
+    ServiceLabel,
+    State,
 )
 from cmk.base.api.agent_based.register.check_plugins import create_check_plugin
-from cmk.base.api.agent_based.type_defs import CheckPlugin, Parameters
+from cmk.base.api.agent_based.register.utils import DUMMY_RULESET_NAME
+from cmk.base.api.agent_based.checking_classes import CheckPlugin
+from cmk.base.api.agent_based.type_defs import Parameters
 from cmk.base.check_api_utils import Service as LegacyService
 from cmk.base.check_utils import get_default_parameters
 from cmk.base.discovered_labels import HostLabel, DiscoveredHostLabels
-
-DUMMY_RULESET_NAME = "non_existent_auto_migration_dummy_rule"
 
 # There are so many check_info keys, make sure we didn't miss one.
 CONSIDERED_KEYS = {
@@ -74,7 +76,7 @@ def _create_discovery_function(
                 yield Service(
                     item=element.item,
                     parameters=wrap_parameters(element.parameters or {}),
-                    labels=list(element.service_labels),
+                    labels=[ServiceLabel(l.name, l.value) for l in element.service_labels],
                 )
             elif isinstance(element, tuple) and len(element) in (2, 3):
                 parameters = _resolve_string_parameters(element[-1], check_name, get_check_context)
@@ -84,7 +86,7 @@ def _create_discovery_function(
                 )
                 # nasty hack for nasty plugins:
                 # Bypass validation. Item should be None or non-empty string!
-                service._item = element[0]  # pylint: disable=protected-access
+                service = service._replace(item=element[0])
                 yield service
             else:
                 # just let it through. Base must deal with bogus return types anyway.
@@ -167,31 +169,62 @@ def _create_check_function(name: str, check_info_dict: Dict[str, Any],
     return check_result_generator
 
 
+def _get_float(raw_value: Any) -> Optional[float]:
+    """Try to convert to float
+
+        >>> _get_float("12.3s")
+        12.3
+
+    """
+    with suppress(TypeError, ValueError):
+        return float(raw_value)
+
+    if not isinstance(raw_value, str):
+        return None
+    # try to cut of units:
+    for i in range(len(raw_value) - 1, 0, -1):
+        with suppress(TypeError, ValueError):
+            return float(raw_value[:i])
+
+    return None
+
+
 def _create_new_result(
         is_details: bool,
         legacy_state: int,
         legacy_text: str,
         legacy_metrics: Union[Tuple, List] = (),
 ) -> Generator[Union[Metric, Result], None, bool]:
-    result_state = state(legacy_state)
+    result_state = State(legacy_state)
 
     if legacy_state or legacy_text:  # skip "Null"-Result
         if is_details:
-            summary: Optional[str] = None
-            details: Optional[str] = legacy_text
+            summary = ""
+            details = legacy_text
         else:
             is_details = "\n" in legacy_text
-            summary, details = legacy_text.split("\n", 1) if is_details else (legacy_text, None)
-        yield Result(
-            state=result_state,
-            summary=summary or None,
-            details=details or None,
+            summary, details = legacy_text.split("\n", 1) if is_details else (legacy_text, "")
+        # Bypass the validation of the Result class:
+        # Legacy plugins may relie on the fact that once a newline
+        # as been in the output, *all* following ouput is sent to
+        # the details. That means we have to create Results with
+        # details only, which is prohibited by the original Result
+        # class.
+        yield Result(state=result_state, summary="Fake")._replace(
+            summary=summary,
+            details=details,
         )
 
     for metric in legacy_metrics:
+        if len(metric) < 2:
+            continue
+        name = str(metric[0])
+        value = _get_float(metric[1])
+        if value is None:  # skip bogus metrics
+            continue
         # fill up with None:
-        name, value, warn, crit, min_, max_ = (
-            v for v, _ in itertools.zip_longest(metric, range(6)))
+        warn, crit, min_, max_ = (
+            _get_float(v) for v, _ in itertools.zip_longest(metric[2:], range(4)))
         yield Metric(name, value, levels=(warn, crit), boundaries=(min_, max_))
 
     return is_details
@@ -261,6 +294,8 @@ def create_check_plugin_from_legacy(
     extra_sections: List[str],
     factory_settings: Dict[str, Dict],
     get_check_context: Callable,
+    *,
+    validate_creation_kwargs: bool = True,
 ) -> CheckPlugin:
 
     if extra_sections:
@@ -319,4 +354,5 @@ def create_check_plugin_from_legacy(
         # trailing '%s'. Therefore, we disable this validation for legacy check plugins.
         # Once all check plugins are migrated to the new API this flag can be removed.
         validate_item=False,
+        validate_kwargs=validate_creation_kwargs,
     )

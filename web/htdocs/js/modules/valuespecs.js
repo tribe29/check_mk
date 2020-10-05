@@ -8,6 +8,7 @@ import * as popup_menu from "popup_menu";
 import * as ajax from "ajax";
 import * as forms from "forms";
 import * as colorpicker from "colorpicker";
+import * as d3 from "d3";
 
 //#   +--------------------------------------------------------------------+
 //#   | Functions needed by HTML code from ValueSpec (valuespec.py)        |
@@ -112,7 +113,7 @@ function list_of_strings_extend(input, split_on_paste, split_separators) {
 }
 
 
-function list_of_strings_add_new_field(input) {
+export function list_of_strings_add_new_field(input) {
     /* The input field has a unique name like "extra_emails_2" for the field with
        the index 2. We need to convert this into "extra_emails_3". */
 
@@ -140,6 +141,7 @@ function list_of_strings_add_new_field(input) {
     container.appendChild(new_div);
 
     // In case there was some TextAsciiAutocomplete popup menu cloned, remove it!
+    d3.select(new_div).select("input.text").attr("placeholder", null);
     var popup_menus = new_div.getElementsByClassName("vs_autocomplete");
     for (var i = 0; i < popup_menus.length; i++) {
         popup_menus[i].parentNode.removeChild(popup_menus[i]);
@@ -591,11 +593,12 @@ export function listofmultiple_add(varprefix, choice_page_name, page_request_var
             }
 
             let ident = handler_data.ident;
-            if (!handler_data.trigger) {
-                // Update select2 to make the disabled attribute be recognized by the dropdown
-                // (See https://github.com/select2/select2/issues/3347)
-                var choice_select2 = $(choice).select2();
-                // Unselect the choosen option
+            // Update select2 to make the disabled attribute be recognized by the dropdown
+            // (See https://github.com/select2/select2/issues/3347)
+            let choice = document.getElementById(varprefix + "_choice");
+            if (choice) {
+                let choice_select2 = $(choice).select2();
+                // Unselect the chosen option
                 choice_select2.val(null).trigger("change");
             }
 
@@ -607,7 +610,7 @@ export function listofmultiple_add(varprefix, choice_page_name, page_request_var
                 return;
             }
 
-            tbody.appendChild(new_row);
+            tbody.insertBefore(new_row, tbody.firstChild);
             forms.enable_dynamic_form_elements(new_row);
             utils.execute_javascript_by_object(new_row);
 
@@ -621,6 +624,11 @@ export function listofmultiple_add(varprefix, choice_page_name, page_request_var
             // Put in a line break following the table if the added row is the first
             if (tbody.childNodes.length == 1)
                 table.parentNode.insertBefore(document.createElement("br"), table.nextSibling);
+
+            // Enable the reset button
+            let reset_button = document.getElementById(varprefix + "_reset");
+            if (reset_button)
+                reset_button.disabled = false;
         }
     });
 }
@@ -635,9 +643,9 @@ export function listofmultiple_del(varprefix, ident) {
     var choice = document.getElementById(varprefix + "_choice");
     if (choice) {
         var i;
-        for (i = 0; i < choice.children.length; i++)
-            if (choice.children[i].value == ident)
-                choice.children[i].disabled = false;
+        for (i = 0; i < choice.options.length; i++)
+            if (choice.options[i].value == ident)
+                choice.options[i].disabled = false;
 
         // Update select2 to make the disabled attribute be recognized by the dropdown
         // (See https://github.com/select2/select2/issues/3347)
@@ -667,9 +675,14 @@ export function listofmultiple_del(varprefix, ident) {
         if (br.nodeName == "BR")
             br.parentNode.removeChild(br);
     }
+
+    // Enable the reset button
+    let reset_button = document.getElementById(varprefix + "_reset");
+    if (reset_button)
+        reset_button.disabled = false;
 }
 
-export function listofmultiple_init(varprefix) {
+export function listofmultiple_init(varprefix, was_submitted) {
     var table = document.getElementById(varprefix + "_table");
     var tbody = table.getElementsByTagName("tbody")[0];
 
@@ -681,20 +694,30 @@ export function listofmultiple_init(varprefix) {
     // Put in a line break following the table if it's not empty
     if (tbody.childNodes.length >= 1)
         table.parentNode.insertBefore(document.createElement("br"), table.nextSibling);
+
+    // Disable the reset button if the form was not submitted yet
+    let reset_button = document.getElementById(varprefix + "_reset");
+    if (reset_button && !was_submitted) {
+        reset_button.disabled = true;
+    }
 }
 
-// The <option> elements in the <select> field of the currently choosen
+// The <option> elements in the <select> field of the currently chosen
 // elements need to be disabled.
 function listofmultiple_disable_selected_options(varprefix)
 {
-    let active_choices = document.getElementById(varprefix + "_active").value.split(";");
+    let active = document.getElementById(varprefix + "_active");
+    if (active.value == "") {
+        return;
+    }
 
+    let active_choices = active.value.split(";");
     let choice_field = document.getElementById(varprefix + "_choice");
     let i;
     if (choice_field) {
-        for (i = 0; i < choice_field.children.length; i++) {
-            if (active_choices.indexOf(choice_field.children[i].value) !== -1) {
-                choice_field.children[i].disabled = true;
+        for (i = 0; i < choice_field.options.length; i++) {
+            if (active_choices.indexOf(choice_field.options[i].value) !== -1) {
+                choice_field.options[i].disabled = true;
             }
         }
     }
@@ -916,4 +939,34 @@ function update_color_picker(varprefix, hex, update_picker) {
 
     if (update_picker)
         vs_color_pickers[varprefix].setHex(hex);
+}
+
+export function visual_filter_list_reset(varprefix, page_request_vars, page_name, reset_ajax_page) {
+    let request = {
+        "varprefix": varprefix,
+        "page_request_vars": page_request_vars,
+        "page_name": page_name
+    };
+    const post_data = "request=" + encodeURIComponent(JSON.stringify(request));
+
+    ajax.call_ajax(reset_ajax_page + ".py", {
+        method: "POST",
+        post_data: post_data,
+        handler_data: {
+            varprefix: varprefix
+        },
+        response_handler: function(handler_data, ajax_response) {
+            let response = JSON.parse(ajax_response);
+            const filters_html = response.result.filters_html;
+            let filter_list = document.getElementById(varprefix + "_popup_filter_list_selected");
+            filter_list.getElementsByClassName("simplebar-content")[0].innerHTML = filters_html;
+            utils.add_simplebar_scrollbar(varprefix + "_popup_filter_list");
+            listofmultiple_disable_selected_options(varprefix);
+            forms.enable_dynamic_form_elements();
+        }
+    });
+
+    // Disable the reset button
+    let reset_button = document.getElementById(varprefix + "_reset");
+    reset_button.disabled = true;
 }

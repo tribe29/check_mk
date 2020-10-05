@@ -10,18 +10,19 @@ from pathlib import Path
 
 import pytest  # type: ignore[import]
 
-from testlib.base import Scenario
+# No stub file
+from testlib.base import Scenario  # type: ignore[import]
 
+from cmk.utils.log import logger
 from cmk.utils.type_defs import SectionName
 
 import cmk.snmplib.snmp_cache as snmp_cache
-import cmk.snmplib.snmp_modes as snmp_modes
 import cmk.snmplib.snmp_scan as snmp_scan
-from cmk.snmplib.snmp_scan import SNMPScanSection
 from cmk.snmplib.type_defs import ABCSNMPBackend, SNMPHostConfig
+from cmk.snmplib.utils import evaluate_snmp_detection
 
 import cmk.base.api.agent_based.register as agent_based_register
-from cmk.base.api.agent_based.register.section_plugins_legacy_scan_function import (
+from cmk.base.api.agent_based.register.section_plugins_legacy.convert_scan_functions import (
     create_detect_spec,)
 
 
@@ -130,22 +131,17 @@ from cmk.base.api.agent_based.register.section_plugins_legacy_scan_function impo
             False,
         ),
     ])
-def test_evaluate_snmp_detection(monkeypatch, config_snmp_scan_functions, name, oids_data,
-                                 expected_result):
+def test_evaluate_snmp_detection(config_snmp_scan_functions, name, oids_data, expected_result):
     def oid_function(oid, _default=None, _name=None):
         return oids_data.get(oid)
-
-    monkeypatch.setattr(snmp_modes, "get_single_oid", lambda oid, *a, **kw: oids_data.get(oid))
 
     scan_function = config_snmp_scan_functions[name]
     assert bool(scan_function(oid_function)) is expected_result
 
     converted_detect_spec = create_detect_spec(name, scan_function, [])
-    actual_result = snmp_scan._evaluate_snmp_detection(
-        converted_detect_spec,
-        name,
-        None,  # type: ignore # not used
-        backend=None,  # type: ignore  # monkeypatched
+    actual_result = evaluate_snmp_detection(
+        detect_spec=converted_detect_spec,
+        oid_value_getter=oids_data.get,
     )
     assert actual_result is expected_result
 
@@ -182,7 +178,7 @@ class SNMPTestBackend(ABCSNMPBackend):
 @pytest.fixture
 def backend():
     try:
-        yield SNMPTestBackend(SNMPConfig)
+        yield SNMPTestBackend(SNMPConfig, logger)
     finally:
         cachefile = Path("tmp/check_mk/snmp_scan_cache/%s.%s" %
                          (SNMPConfig.hostname, SNMPConfig.ipaddress))
@@ -213,30 +209,22 @@ def cache_oids(backend):
 @pytest.mark.usefixtures("scenario")
 @pytest.mark.usefixtures("cache_oids")
 @pytest.mark.parametrize("oid", [snmp_scan.OID_SYS_DESCR, snmp_scan.OID_SYS_OBJ])
-def test_snmp_scan_cache_description__oid_missing(oid, backend):
+def test_snmp_scan_prefetch_description_object__oid_missing(oid, backend):
     snmp_cache.set_single_oid_cache(oid, None)
 
     with pytest.raises(snmp_scan.MKSNMPError, match=r"Cannot fetch [\w ]+ OID %s" % oid):
-        snmp_scan._snmp_scan_cache_description(
-            False,
-            do_snmp_scan=False,
-            backend=backend,
-        )
+        snmp_scan._prefetch_description_object(backend=backend)
 
 
 @pytest.mark.usefixtures("scenario")
 @pytest.mark.usefixtures("cache_oids")
-def test_snmp_scan_cache_description__success_non_binary(backend):
+def test_snmp_scan_prefetch_description_object__success(backend):
     sys_desc = snmp_cache.get_oid_from_single_oid_cache(snmp_scan.OID_SYS_DESCR)
     sys_obj = snmp_cache.get_oid_from_single_oid_cache(snmp_scan.OID_SYS_OBJ)
     assert sys_desc
     assert sys_obj
 
-    snmp_scan._snmp_scan_cache_description(
-        binary_host=False,
-        do_snmp_scan=False,
-        backend=backend,
-    )
+    snmp_scan._prefetch_description_object(backend=backend)
 
     # Success is no-op
     assert snmp_cache.get_oid_from_single_oid_cache(snmp_scan.OID_SYS_DESCR) == sys_desc
@@ -245,12 +233,8 @@ def test_snmp_scan_cache_description__success_non_binary(backend):
 
 @pytest.mark.usefixtures("scenario")
 @pytest.mark.usefixtures("cache_oids")
-def test_snmp_scan_cache_description__success_binary(backend):
-    snmp_scan._snmp_scan_cache_description(
-        binary_host=True,
-        do_snmp_scan=False,
-        backend=backend,
-    )
+def test_snmp_scan_fake_description_object__success(backend):
+    snmp_scan._fake_description_object()
 
     assert snmp_cache.get_oid_from_single_oid_cache(snmp_scan.OID_SYS_DESCR) == ""
     assert snmp_cache.get_oid_from_single_oid_cache(snmp_scan.OID_SYS_OBJ) == ""
@@ -259,13 +243,9 @@ def test_snmp_scan_cache_description__success_binary(backend):
 @pytest.mark.usefixtures("scenario")
 @pytest.mark.usefixtures("cache_oids")
 def test_snmp_scan_find_plugins__success(backend):
-    sections = [
-        SNMPScanSection(_.name, _.detect_spec)
-        for _ in agent_based_register.iter_all_snmp_sections()
-    ]
-    found = snmp_scan._snmp_scan_find_sections(
+    sections = [(s.name, s.detect_spec) for s in agent_based_register.iter_all_snmp_sections()]
+    found = snmp_scan._find_sections(
         sections,
-        do_snmp_scan=False,
         on_error="raise",
         backend=backend,
     )
@@ -282,17 +262,12 @@ def test_gather_available_raw_section_names_defaults(backend, mocker):
     assert snmp_cache.get_oid_from_single_oid_cache(snmp_scan.OID_SYS_OBJ)
 
     assert snmp_scan.gather_available_raw_section_names(
-        [
-            SNMPScanSection(_.name, _.detect_spec)
-            for _ in agent_based_register.iter_all_snmp_sections()
-        ],
+        [(s.name, s.detect_spec) for s in agent_based_register.iter_all_snmp_sections()],
         on_error="raise",
-        do_snmp_scan=False,
-        binary_host=False,
+        missing_sys_description=False,
         backend=backend,
     ) == {
         SectionName("hr_mem"),
-        SectionName("mgmt_snmp_info"),
         SectionName("snmp_info"),
         SectionName("snmp_os"),
         SectionName("snmp_uptime"),

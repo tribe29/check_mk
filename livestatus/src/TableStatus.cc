@@ -16,6 +16,7 @@
 #include "BoolLambdaColumn.h"
 #include "Column.h"
 #include "DoubleLambdaColumn.h"
+#include "FileColumn.h"
 #include "IntLambdaColumn.h"
 #include "MonitoringCore.h"
 #include "Query.h"
@@ -56,7 +57,7 @@ extern int external_command_buffer_slots;
 #endif  // NAGIOS4
 
 TableStatus::TableStatus(MonitoringCore *mc) : Table(mc) {
-    Column::Offsets offsets{};
+    ColumnOffsets offsets{};
     addCounterColumns("neb_callbacks", "NEB callbacks", offsets,
                       Counter::neb_callbacks);
     addCounterColumns("requests", "requests to Livestatus", offsets,
@@ -195,14 +196,14 @@ TableStatus::TableStatus(MonitoringCore *mc) : Table(mc) {
         "The maximum number of slots used in the external command buffer",
         external_command_buffer.high));
 #else
-    addColumn(std::make_unique<IntLambdaColumn::Constant>(
+    addColumn(std::make_unique<IntLambdaColumn<TableStatus>::Constant>(
         "external_command_buffer_slots",
         "The size of the buffer for the external commands (placeholder)", 0));
-    addColumn(std::make_unique<IntLambdaColumn::Constant>(
+    addColumn(std::make_unique<IntLambdaColumn<TableStatus>::Constant>(
         "external_command_buffer_usage",
         "The number of slots in use of the external command buffer (placeholder)",
         0));
-    addColumn(std::make_unique<IntLambdaColumn::Constant>(
+    addColumn(std::make_unique<IntLambdaColumn<TableStatus>::Constant>(
         "external_command_buffer_max",
         "The maximum number of slots used in the external command buffer (placeholder)",
         0));
@@ -265,6 +266,14 @@ TableStatus::TableStatus(MonitoringCore *mc) : Table(mc) {
         "helper_usage_real_time",
         "The average usage of the real time check helpers, ranging from 0.0 (0%) up to 1.0 (100%)",
         offsets, [](const TableStatus & /*r*/) { return 0.0; }));
+    addColumn(std::make_unique<DoubleLambdaColumn<TableStatus>>(
+        "helper_usage_fetcher",
+        "The average usage of the fetcher helpers, ranging from 0.0 (0%) up to 1.0 (100%)",
+        offsets, [](const TableStatus & /*r*/) { return 0.0; }));
+    addColumn(std::make_unique<DoubleLambdaColumn<TableStatus>>(
+        "helper_usage_checker",
+        "The average usage of the checker helpers, ranging from 0.0 (0%) up to 1.0 (100%)",
+        offsets, [](const TableStatus & /*r*/) { return 0.0; }));
 
     addColumn(std::make_unique<BoolLambdaColumn<TableStatus>>(
         "has_event_handlers",
@@ -291,11 +300,15 @@ TableStatus::TableStatus(MonitoringCore *mc) : Table(mc) {
         offsets, [](const TableStatus &ts) {
             return static_cast<int32_t>(ts.core()->numQueuedAlerts());
         }));
+    addColumn(std::make_unique<FileColumn<TableStatus>>(
+        "license_usage_history", "Historic license usage information", offsets,
+        [mc]() { return mc->licenseUsageHistoryPath(); },
+        [](const TableStatus & /*r*/) { return std::filesystem::path{}; }));
 }
 
 void TableStatus::addCounterColumns(const std::string &name,
                                     const std::string &description,
-                                    const Column::Offsets &offsets,
+                                    const ColumnOffsets &offsets,
                                     Counter which) {
     addColumn(std::make_unique<DoubleLambdaColumn<TableStatus>>(
         name, "The number of " + description + " since program start", offsets,

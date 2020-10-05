@@ -6,7 +6,8 @@
 
 import abc
 import os
-from typing import List, Optional, Dict, Any, Tuple, Type
+from typing import List, Optional, Dict, Any, Tuple, Type, Literal, Union
+from contextlib import suppress
 
 from livestatus import SiteId
 
@@ -23,6 +24,7 @@ RoleSpec = Dict[str, Any]  # TODO: Improve this type
 Roles = Dict[str, RoleSpec]  # TODO: Improve this type
 UserConnectionSpec = Dict[str, Any]  # TODO: Improve this type
 UserSyncConfig = Optional[str]
+CheckCredentialsResult = Union[UserId, None, Literal[False]]
 
 
 def load_cached_profile(user_id: UserId) -> Optional[UserSpec]:
@@ -122,8 +124,8 @@ def cleanup_connection_id(connection_id: Optional[str]) -> str:
     if connection_id is None:
         return 'htpasswd'
 
-    # Old Check_MK used a static "ldap" connector id for all LDAP users.
-    # Since Check_MK now supports multiple LDAP connections, the ID has
+    # Old Checkmk used a static "ldap" connector id for all LDAP users.
+    # Since Checkmk now supports multiple LDAP connections, the ID has
     # been changed to "default". But only transform this when there is
     # no connection existing with the id LDAP.
     if connection_id == 'ldap' and not get_connection('ldap'):
@@ -146,6 +148,11 @@ def get_connection(connection_id: Optional[str]) -> 'Optional[UserConnector]':
         g.user_connections[connection_id] = connections_with_id[0] if connections_with_id else None
 
     return g.user_connections[connection_id]
+
+
+def clear_user_connection_cache() -> None:
+    with suppress(AttributeError):
+        del g.user_connections
 
 
 def active_connections() -> 'List[Tuple[str, UserConnector]]':
@@ -217,6 +224,8 @@ def save_connection_config(connections: List[UserConnectionSpec],
 
     for connector_class in user_connector_registry.values():
         connector_class.config_changed()
+
+    clear_user_connection_cache()
 
 
 #.
@@ -332,7 +341,7 @@ class UserConnector(metaclass=abc.ABCMeta):
     #     False       -> Login failed
     #     None        -> Unknown user
     @abc.abstractmethod
-    def check_credentials(self, user_id, password):
+    def check_credentials(self, user_id, password) -> CheckCredentialsResult:
         return None
 
     # Optional: Hook function can be registered here to be executed

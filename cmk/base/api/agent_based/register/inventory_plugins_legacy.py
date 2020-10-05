@@ -14,14 +14,12 @@ from cmk.utils.check_utils import maincheckify
 from cmk.base.api.agent_based.inventory_classes import (
     Attributes,
     TableRow,
+    InventoryFunction,
+    InventoryPlugin,
+    InventoryResult,
 )
 from cmk.base.api.agent_based.register.inventory_plugins import create_inventory_plugin
-from cmk.base.api.agent_based.type_defs import (
-    InventoryFunction,
-    InventoryGenerator,
-    InventoryPlugin,
-    Parameters,
-)
+from cmk.base.api.agent_based.type_defs import Parameters
 from cmk.base.inventory import initialize_inventory_tree  # TODO (mo): move this here.
 
 
@@ -47,7 +45,7 @@ def _create_inventory_function(
     extra_sections_count: int,
 ) -> InventoryFunction:
     """Create an API compliant inventory function"""
-    def _inventory_generator(*args) -> InventoryGenerator:
+    def _inventory_generator(*args) -> InventoryResult:
         # mock the inventory/status data trees to later generate API objects
         # base on the info contained in them after running the legacy inventory function
         local_status_data_tree = MockStructuredDataTree()
@@ -73,12 +71,12 @@ def _create_inventory_function(
         def inventory_migration_wrapper(
             params: Parameters,
             section: Any,
-        ) -> InventoryGenerator:
+        ) -> InventoryResult:
             yield from _inventory_generator(_add_extra_info(section), params)
     else:
 
         def inventory_migration_wrapper(  # type: ignore[misc] # different args on purpose!
-                section: Any,) -> InventoryGenerator:
+                section: Any,) -> InventoryResult:
             yield from _inventory_generator(_add_extra_info(section))
 
     return inventory_migration_wrapper
@@ -93,7 +91,7 @@ def _function_has_params(legacy_function: Callable) -> bool:
 def _generate_api_objects(
     local_status_data_tree: MockStructuredDataTree,
     local_inventory_tree: MockStructuredDataTree,
-) -> InventoryGenerator:
+) -> InventoryResult:
 
     yield from _generate_attributes(local_status_data_tree, local_inventory_tree)
     yield from _generate_table_rows(local_status_data_tree, local_inventory_tree)
@@ -104,17 +102,22 @@ def _generate_attributes(
     local_inventory_tree: MockStructuredDataTree,
 ) -> Generator[Attributes, None, None]:
 
-    for path in set(local_status_data_tree.attributes) | set(local_inventory_tree.attributes):
+    for path in sorted(
+            set(local_status_data_tree.attributes) | set(local_inventory_tree.attributes)):
         status_attributes = {
-            str(k): str(v) for k, v in local_status_data_tree.attributes.get(path, {}).items()
+            str(k): v for k, v in local_status_data_tree.attributes.get(path, {}).items()
         }
         inventory_attributes = {
-            str(k): str(v)
+            str(k): v
             for k, v in local_inventory_tree.attributes.get(path, {}).items()
             if str(k) not in status_attributes
         }
-        yield Attributes(
-            path=list(path),
+        # Bypass the validation of the Attributes class:
+        # Legacy plugins may put other types than strings in the attributes,
+        # and we keep it that way, as this will trigger painter functions
+        # in the inventory view.
+        attr = Attributes(path=list(path))
+        yield attr._replace(
             inventory_attributes=inventory_attributes,
             status_attributes=status_attributes,
         )
@@ -125,7 +128,7 @@ def _generate_table_rows(
     local_inventory_tree: MockStructuredDataTree,
 ) -> Generator[TableRow, None, None]:
 
-    for path in set(local_status_data_tree.tables) | set(local_inventory_tree.tables):
+    for path in sorted(set(local_status_data_tree.tables) | set(local_inventory_tree.tables)):
         inv_table = local_inventory_tree.tables.get(path, [])
         status_table = local_status_data_tree.tables.get(path, [])
 

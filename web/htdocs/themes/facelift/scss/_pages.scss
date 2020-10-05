@@ -196,20 +196,11 @@ body {
     div#main_page_content {
       flex: 1 1 auto;
       height: 100%;
-      padding-right: 12px;
+      padding-right: 11px;
       padding-bottom: 20px;
       overflow: auto;
 
-      div.simplebar-track { background-color: $simplebar-track-bg-color; }
-
-      div.simplebar-horizontal div.simplebar-scrollbar {
-        height: 6px;
-        &::before { top: 3px; }
-      }
-
-      div.simplebar-vertical {
-        &, div.simplebar-scrollbar { width: 12px; }
-      }
+      div.simplebar-track { background-color: $bg-color; }
 
       body.dashboard & { padding-bottom: 0; }
     }
@@ -268,132 +259,6 @@ body {
   }
 }
 
-
-/*-------------------------------------------------------------------------.
-|         ____            _            _   _ _       _                     |
-|        / ___|___  _ __ | |_ _____  _| |_| (_)_ __ | | _____              |
-|       | |   / _ \| '_ \| __/ _ \ \/ / __| | | '_ \| |/ / __|             |
-|       | |__| (_) | | | | ||  __/>  <| |_| | | | | |   <\__ \             |
-|        \____\___/|_| |_|\__\___/_/\_\\__|_|_|_| |_|_|\_\___/             |
-|                                                                          |
-+--------------------------------------------------------------------------+
-| The blue buttons at the top of the screen used for navigation.           |
-'-------------------------------------------------------------------------*/
-/* TODO: Consolidate button styling with other buttons (e.g. sidebar button) */
-
-div.contextlinks {
-  margin-top: 8px;
-  margin-bottom: 5px;
-
-  .end {
-    clear: left;
-  }
-}
-
-div.contextlink {
-  position: relative;
-  float: left;
-  width: 158px;
-  height: 36px;
-  margin-right: 5px;
-  margin-bottom: -3px;
-  overflow: hidden;
-  font-size: $font-size-small;
-  text-align: center;
-  white-space: nowrap;
-  vertical-align: middle;
-  border: none;
-  border-radius: $primary-border-radius;
-  box-sizing: border-box;
-
-  a,
-  body.main .popup_menu span,
-  body.main .popup_menu & span {
-    position: relative;
-    top: 0;
-    right: 0;
-    bottom: 0;
-    left: 0;
-    display: block;
-    height: 28px; /* $button-height; */
-    padding: 5px;
-    overflow: hidden;
-    font-size: $font-size-global;
-    font-weight: $font-weight-default;
-    line-height: 18px;
-    letter-spacing: $letter-spacing-default;
-    color: $primary-link-color;
-    text-decoration: none;
-    text-overflow: ellipsis;
-    cursor: pointer;
-    background: $bg-color-secondary;
-    border: 1px solid $color-table-border;
-    border-radius: $primary-border-radius;
-    box-shadow: none;
-    box-sizing: border-box;
-  }
-
-  &:hover,
-  &:active,
-  &:focus {
-    a,
-    body.main .popup_menu span,
-    body.main .popup_menu & span {
-      position: relative;
-      top: 0;
-      right: 0;
-      bottom: 0;
-      left: 0;
-      padding: 5px;
-      font-size: $font-size-global;
-      font-weight: $font-weight-default;
-      letter-spacing: $letter-spacing-default;
-      color: $font-color;
-      text-decoration: none;
-      background: $button-background-hover;
-      border: 1px solid $color-table-border;
-      outline: none;
-      box-shadow: none;
-    }
-  }
-}
-
-div.contextlink.down {
-  a,
-  body.main .popup_menu span,
-  body.main .popup_menu & span {
-    background-color: $toggle-button-down-bg-color;
-    border-color: $toggle-button-down-border-color;
-    box-shadow: none;
-
-    &:hover {
-      background-color: $toggle-button-down-hover-bg-color;
-      border-color: $toggle-button-down-hover-border-color;
-
-    }
-  }
-}
-
-/* Specific context link styles */
-div.contextlink {
-  &.short {
-    width: 38px;
-  }
-
-  &.hot a {
-    color: $hot-font-color;
-    background-color: $hot-bg-color;
-    border-color: $color-nuance-16;
-  }
-
-  img {
-    position: relative;
-    top: -1px;
-    width: 18px;
-    height: 18px;
-    margin-right: 5px;
-  }
-}
 
 /*-------------------------------------------------------------------------.
 |            ____        _          _____     _     _                      |
@@ -1117,10 +982,9 @@ table.nform {
     a.more {
       float: right;
 
-      img {
-        top: 3px;
-        width: 16px;
-        height: 16px;
+      div::after {
+        position: relative;
+        top: 2px;
       }
     }
   }
@@ -1339,6 +1203,7 @@ div.help {
   background-image: none;
   border-radius: 5px;
   box-shadow: none;
+  text-transform: none; /* Neccessary due to help in H3 */
 
   &:before {
     display: inline-block;
@@ -1570,37 +1435,6 @@ body.main .popup_menu {
 |                                                                          |
 '-------------------------------------------------------------------------*/
 
-/* TODO: Reproduce div.keysym */
-div.keysym {
-  display: inline-block;
-  padding: 2px 5px;
-  margin: 0 1px;
-  color: rgb(255, 255, 255); /* font-style: italic; */
-  text-align: center;
-  background-color: rgb(51, 51, 51);
-  border-color: rgb(136, 136, 136) rgb(68, 68, 68) rgb(0, 0, 0) rgb(102, 102, 102);
-  border-style: solid;
-  border-width: 2px;
-  border-radius: 4px;
-  box-shadow: 0.5px 0.5px 1px rgb(0, 0, 0);
-
-  /* Contextlinks with embedded keyboard button */
-  div.contextlink & {
-    position: absolute;
-    top: 4px;
-    right: 5px;
-    padding: 1px 5px;
-    font-size: 8px;
-    background-color: rgb(68, 102, 119);
-    border-color: rgb(136, 170, 187) rgb(34, 68, 85) rgb(17, 51, 68) rgb(119, 153, 170);
-    border-width: 2px;
-  }
-}
-
-div.contextlink.button a {
-  width: 135px;
-}
-
 div.log_output, .crash_report pre {
   padding: 8px 16px;
   margin: 16px;
@@ -1620,7 +1454,7 @@ div.log_output {
   pre {
     font-family: monospace;
     font-size: $font-size-global;
-    color: $lightgrey;
+    color: $font-color;
   }
 }
 

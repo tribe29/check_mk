@@ -443,13 +443,6 @@ class ACTestBackupNotEncryptedConfigured(ACTest):
 
 class ABCACApacheTest(ACTest, metaclass=abc.ABCMeta):
     """Abstract base class for apache related tests"""
-
-    # NOTE: This class is obviously still abstract, but pylint fails to see
-    # this, even in the presence of the meta class assignment below, see
-    # https://github.com/PyCQA/pylint/issues/179.
-
-    # pylint: disable=abstract-method
-
     def _get_number_of_idle_processes(self):
         apache_status = self._get_apache_status()
 
@@ -604,7 +597,7 @@ class ACTestCheckMKHelperUsage(ACTest):
         return ACTestCategories.performance
 
     def title(self) -> str:
-        return _("Check_MK helper usage")
+        return _("Checkmk helper usage")
 
     def help(self) -> str:
         return _(
@@ -811,7 +804,7 @@ class ACTestESXDatasources(ACTest):
         return ACTestCategories.deprecations
 
     def title(self) -> str:
-        return _("The Check_MK agent is queried via the ESX datasource program")
+        return _("The Checkmk agent is queried via the ESX datasource program")
 
     def help(self) -> str:
         return _("The Check_MK agent is queried via the datasource program for ESX systems. "

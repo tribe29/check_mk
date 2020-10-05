@@ -140,10 +140,6 @@ class ModeFolder(WatoMode):
                             title=_("Agent settings"),
                             entries=list(self._page_menu_entries_agents()),
                         ),
-                        PageMenuTopic(
-                            title=_("User interface settings"),
-                            entries=list(self._page_menu_entries_user_interface()),
-                        ),
                     ],
                 ),
                 PageMenuDropdown(
@@ -235,6 +231,8 @@ class ModeFolder(WatoMode):
                 title=_("Add host"),
                 icon_name="new",
                 item=make_simple_link(self._folder.url([("mode", "newhost")])),
+                is_shortcut=True,
+                is_suggested=True,
             )
             yield PageMenuEntry(
                 title=_("Add cluster"),
@@ -379,6 +377,8 @@ class ModeFolder(WatoMode):
                     title=_("Add subfolder"),
                     icon_name="newfolder",
                     item=make_simple_link(self._folder.url([("mode", "newfolder")])),
+                    is_shortcut=True,
+                    is_suggested=True,
                 )
 
         yield make_folder_status_link(watolib.Folder.current(), view_name="allhosts")
@@ -485,19 +485,6 @@ class ModeFolder(WatoMode):
                 watolib.folder_preserving_link([("mode", "rulesets"), ("group", "snmp")])),
         )
 
-    def _page_menu_entries_user_interface(self) -> Iterator[PageMenuEntry]:
-        if not config.user.may("wato.rulesets") and not config.user.may("wato.seeall"):
-            return
-
-        yield PageMenuEntry(
-            title=_("User interface"),
-            icon_name="rulesets",
-            item=make_simple_link(
-                watolib.folder_preserving_link([("mode", "rulesets"),
-                                                ("group", "user_interface")])),
-            is_advanced=True,
-        )
-
     def _page_menu_entries_related(self) -> Iterator[PageMenuEntry]:
         yield PageMenuEntry(
             title=_("Tags"),
@@ -591,8 +578,8 @@ class ModeFolder(WatoMode):
         if html.request.var("_hosts_reset_sorting") or html.request.var("_hosts_sort"):
             return
 
-        selected_host_names = get_hostnames_from_checkboxes(deflt=True)
-        if len(selected_host_names) == 0:
+        selected_host_names = get_hostnames_from_checkboxes()
+        if not selected_host_names:
             raise MKUserError(None,
                               _("Please select some hosts before doing bulk operations on hosts."))
 
@@ -608,10 +595,10 @@ class ModeFolder(WatoMode):
 
         # Move
         if html.request.var("_bulk_move"):
-            target_folder_path = html.request.var("bulk_moveto",
+            target_folder_path = html.request.var("_bulk_moveto",
                                                   html.request.var("_top_bulk_moveto"))
             if target_folder_path == "@":
-                raise MKUserError("bulk_moveto", _("Please select the destination folder"))
+                raise MKUserError("_bulk_moveto", _("Please select the destination folder"))
             target_folder = watolib.Folder.folder(target_folder_path)
             watolib.Folder.current().move_hosts(selected_host_names, target_folder)
             return None, _("Moved %d hosts to %s") % (len(selected_host_names),
@@ -716,8 +703,8 @@ class ModeFolder(WatoMode):
             self._show_subfolder_buttons(subfolder)
             html.close_div()  # hoverarea
         else:
-            html.icon(escaping.strip_tags(subfolder.reason_why_may_not("read")),
-                      "autherr",
+            html.icon("autherr",
+                      escaping.strip_tags(subfolder.reason_why_may_not("read")),
                       class_=["autherr"])
             html.div('', class_="hoverarea")
 
@@ -768,7 +755,7 @@ class ModeFolder(WatoMode):
         permitted_groups, _folder_contact_groups, _use_for_services = subfolder.groups()
         for num, pg in enumerate(permitted_groups):
             cgalias = groups.get(pg, {'alias': pg})['alias']
-            html.icon(_("Contactgroups that have permission on this folder"), "contactgroups")
+            html.icon("contactgroups", _("Contactgroups that have permission on this folder"))
             html.write_text(' %s' % cgalias)
             html.br()
             if num > 1 and len(permitted_groups) > 4:
@@ -849,6 +836,7 @@ class ModeFolder(WatoMode):
                 self._show_host_row(rendered_hosts, table, hostname, search_text, colspan,
                                     host_errors, contact_group_names)
 
+        html.hidden_field("selection_id", weblib.selection_id())
         html.hidden_fields()
         html.end_form()
 
@@ -903,16 +891,16 @@ class ModeFolder(WatoMode):
         if errors:
             msg = _("Warning: This host has an invalid configuration: ")
             msg += ", ".join(errors)
-            html.icon(msg, "validation_error")
+            html.icon("validation_error", msg)
             html.nbsp()
 
         if host.is_offline():
-            html.icon(_("This host is disabled"), "disabled")
+            html.icon("disabled", _("This host is disabled"))
             html.nbsp()
 
         if host.is_cluster():
-            html.icon(
-                _("This host is a cluster of %s") % ", ".join(host.cluster_nodes()), "cluster")
+            html.icon("cluster",
+                      _("This host is a cluster of %s") % ", ".join(host.cluster_nodes()))
             html.nbsp()
 
         html.a(hostname, href=host.edit_url())
@@ -1033,7 +1021,7 @@ class ModeFolder(WatoMode):
 
             choices.insert(0, ("@", _("(select target folder)")))
 
-            html.dropdown("bulk_moveto",
+            html.dropdown("_bulk_moveto",
                           choices,
                           deflt="@",
                           label=_("Move to folder:"),
@@ -1198,9 +1186,9 @@ class ABCFolderMode(WatoMode, metaclass=abc.ABCMeta):
         new = self._folder.name() is None
         is_enabled = new or not watolib.Folder.current().locked()
 
-        # TODO: Shouldn't we tell make_simple_form_page_menu() how many levels
-        # to go up instead of constructing some wrong breadcrumb here? Investigate
-        # all call sites
+        # When backfolder is set, we have the special situation that we want to redirect the user
+        # two breadcrumb layers up. This is a very specific case, so we realize this locally instead
+        # of using a generic approach. Just like it done locally by the action method.
         if html.request.has_var("backfolder"):
             breadcrumb = make_folder_breadcrumb(
                 watolib.Folder.folder(html.request.var("backfolder")))

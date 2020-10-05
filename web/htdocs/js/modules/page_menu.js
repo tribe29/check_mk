@@ -90,9 +90,9 @@ export function toggle_popup(popup_id) {
     close_active_popups();
 
     if (was_open)
-        utils.remove_class(popup, "active");
+        do_close_popup(popup);
     else
-        utils.add_class(popup, "active");
+        do_open_popup(popup);
 }
 
 // Opens a PageMenuEntryPopup from a page menu entry
@@ -100,31 +100,58 @@ export function open_popup(popup_id) {
     close_active_dropdown();
     close_active_popups();
 
-    var popup = document.getElementById(popup_id);
+    do_open_popup(document.getElementById(popup_id));
+}
+
+function do_open_popup(popup) {
     utils.add_class(popup, "active");
+
+    // Call registered hook
+    if (Object.prototype.hasOwnProperty.call(on_open, popup.id)) {
+        on_open[popup.id]();
+    }
 }
 
 // Closes all open PageMenuEntryPopup
 function close_active_popups() {
     document.querySelectorAll(".page_menu_popup").forEach((popup) => {
-        utils.remove_class(popup, "active");
+        do_close_popup(popup);
     });
 }
 
 // Close a specific PageMenuEntryPopup
 export function close_popup(a) {
-    var popup = a.closest(".page_menu_popup");
+    do_close_popup(a.closest(".page_menu_popup"));
+}
+
+function do_close_popup(popup) {
     utils.remove_class(popup, "active");
+
+    // Call registered hook
+    if (Object.prototype.hasOwnProperty.call(on_close, popup.id)) {
+        on_close[popup.id]();
+    }
+}
+
+const on_open = {};
+const on_close = {};
+
+export function register_on_open_handler(popup_id, handler) {
+    on_open[popup_id] = handler;
+}
+
+export function register_on_close_handler(popup_id, handler) {
+    on_close[popup_id] = handler;
 }
 
 export function toggle_suggestions() {
-    var oBody = document.body;
+    var oPageMenuBar = document.getElementById("page_menu_bar");
     var open;
-    if (utils.has_class(oBody, "hide_suggestions")) {
-        utils.remove_class(oBody, "hide_suggestions");
+    if (utils.has_class(oPageMenuBar, "hide_suggestions")) {
+        utils.remove_class(oPageMenuBar, "hide_suggestions");
         open = "on";
     } else {
-        utils.add_class(oBody, "hide_suggestions");
+        utils.add_class(oPageMenuBar, "hide_suggestions");
         open = "off";
     }
     foldable_container.persist_tree_state("suggestions", "all", open);
@@ -153,12 +180,23 @@ export function toggle_filter_group_display(filter_group)
     utils.toggle_class(filter_group, "active", "inactive");
 }
 
-// Scroll to the top after adding new filters
-export function add_filter_scroll_update()
+export function on_filter_popup_open()
 {
-    let scrollable = document.getElementById("popup_filter_list").getElementsByClassName("simplebar-content-wrapper")[0];
+    utils.update_url_parameter("_show_filter_form", "1");
+}
+
+export function on_filter_popup_close()
+{
+    utils.update_url_parameter("_show_filter_form", "0");
+}
+
+// Scroll to the top after adding new filters
+export function update_filter_list_scroll(filter_list_id)
+{
+    let filter_list = document.getElementById(filter_list_id);
+    let scrollable = filter_list.getElementsByClassName("simplebar-content-wrapper")[0];
     try { // scrollTo() is not supported in IE
-        scrollable.scrollTo({top: 0, left: 0, behavior: "smooth"});
+        setTimeout(() => { scrollable.scrollTo({top: 0, left: 0, behavior: "smooth"}); }, 200);
     }
     catch (e) {
         scrollable.scrollTop = 0;
@@ -169,4 +207,11 @@ export function update_page_state_top_line(text)
 {
     let container = document.getElementById("page_state_top_line");
     container.innerHTML = text;
+}
+
+export function side_popup_add_simplebar_scrollbar(popup_id)
+{
+    let popup = document.getElementById(popup_id);
+    let content = popup.getElementsByClassName("side_popup_content")[0];
+    utils.add_simplebar_scrollbar_to_object(content);
 }

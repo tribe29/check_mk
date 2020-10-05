@@ -301,6 +301,19 @@ input[type="submit"]:focus {
 img.icon {
   width: 20px;
   height: 20px;
+
+}
+
+span.emblem {
+  position: relative;
+}
+
+img.emblem {
+  position: absolute;
+  right: -5px;
+  bottom: -12px;
+  width: 10px;
+  height: 10px;
 }
 
 a.inline img.icon, img.icon.inline, div.icon {
@@ -752,13 +765,6 @@ table.listchoice {
       margin: 0;
     }
   }
-
-  div.floatfilter.double > div.content > & {
-    display: block;
-    height: 80px;
-    overflow: hidden;
-    overflow-y:scroll;
-  }
 }
 
 div.popup_container {
@@ -801,7 +807,7 @@ div#hover_menu {
 
   div.message {
     color: $font-color;
-    background-color: $black;
+    background-color: $bg-color;
   }
 
   .graph_container div.title {
@@ -1408,13 +1414,6 @@ div.info {
   }
 }
 
-.filterform {
-  input, select, textarea, div.snapin select, div.snapin & select,
-  div.snapin textarea, div.snapin & textarea, #mk_side_search_field {
-    column-span: all;
-  }
-}
-
 body.main a, body.main .popup_menu span, body.main .popup_menu a,
 body.main a:link, body.main a:visited {
   color: $font-color;
@@ -1430,9 +1429,20 @@ tr.hidden {
 
 
 .simplebar-scrollbar::before {
-  left: 5px;
-  background: $success;
-  border-radius: 0;
+  background: $simplebar-scrollbar-color;
+  border-radius: 2px;
+}
+
+.simplebar-track {
+  &.simplebar-vertical div.simplebar-scrollbar::before {
+    left: 3px;
+    width: $simplebar-scrollbar-width;
+  }
+
+  &.simplebar-horizontal div.simplebar-scrollbar {
+    top: 3px;
+    height: $simplebar-scrollbar-width;
+  }
 }
 
 .simplebar-scrollbar.simplebar-visible::before {

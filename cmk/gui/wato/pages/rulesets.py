@@ -11,7 +11,7 @@ import pprint
 import re
 import json
 from enum import Enum, auto
-from typing import Dict, Generator, List, Optional, Union, Any, Iterable
+from typing import Dict, Generator, List, Optional, Union, Any, Iterable, Type
 
 from six import ensure_str
 
@@ -36,14 +36,11 @@ from cmk.gui.exceptions import MKUserError, MKAuthException
 from cmk.gui.i18n import _
 from cmk.gui.globals import html
 from cmk.gui.valuespec import (
-    Labels,
-    SingleLabel,
     Transform,
     Checkbox,
     ListChoice,
     Tuple,
     ListOfStrings,
-    ListOf,
     Dictionary,
     RegExpUnicode,
     DropdownChoice,
@@ -56,8 +53,10 @@ from cmk.gui.page_menu import (
     PageMenuTopic,
     PageMenuEntry,
     PageMenuSearch,
-    make_simple_link,
     make_display_options_dropdown,
+    make_simple_link,
+    make_form_submit_link,
+    make_simple_form_page_menu,
 )
 from cmk.gui.watolib.predefined_conditions import PredefinedConditionStore
 from cmk.gui.watolib.rulesets import RuleConditions
@@ -72,7 +71,6 @@ from cmk.gui.plugins.wato import (
     WatoMode,
     mode_registry,
     wato_confirm,
-    global_buttons,
     make_action_link,
     add_change,
     may_edit_ruleset,
@@ -81,6 +79,8 @@ from cmk.gui.plugins.wato import (
     HostTagCondition,
     DictHostTagCondition,
 )
+
+from cmk.gui.plugins.wato.utils import LabelCondition
 
 if watolib.has_agent_bakery():
     import cmk.gui.cee.plugins.wato.agent_bakery.misc as agent_bakery  # pylint: disable=import-error,no-name-in-module
@@ -334,7 +334,11 @@ class ModeRuleSearch(ABCRulesetMode):
         yield _page_menu_entry_predefined_conditions()
 
     def page(self):
-        search_form(default_value=self._search_options.get("fulltext", ""))
+        # When the detailed search form is involved, don't show the quick search field on the result
+        # page
+        if not html.form_submitted("rule_search"):
+            search_form(title="%s: " % _("Quick search"),
+                        default_value=self._search_options.get("fulltext", ""))
         super().page()
 
 
@@ -462,10 +466,10 @@ class ModeRulesetGroup(ABCRulesetMode):
             )
 
         yield PageMenuEntry(
-            title=_("Search rules"),
+            title=_("Rule search"),
             icon_name="search",
-            item=make_simple_link(html.makeuri([
-                ("mode", "rulesets"),
+            item=make_simple_link(html.makeuri_contextless([
+                ("mode", "rule_search"),
             ])),
         )
 
@@ -504,10 +508,8 @@ class ModeStaticChecksRulesets(ABCRulesetMode):
         return watolib.StaticChecksRulesets()
 
     def _set_title_and_help(self):
-        self._title = _("Manual services")
-        self._help = _(
-            "Here you can create explicit checks that are not being created by the automatic service discovery."
-        )
+        rulegroup = watolib.get_rulegroup("static")
+        self._title, self._help = rulegroup.title, rulegroup.help
 
 
 def _page_menu_entry_predefined_conditions() -> PageMenuEntry:
@@ -518,13 +520,6 @@ def _page_menu_entry_predefined_conditions() -> PageMenuEntry:
             ("mode", "predefined_conditions"),
         ])),
     )
-
-
-def predefined_conditions_button():
-    html.context_button(_("Predef. conditions"),
-                        watolib.folder_preserving_link([
-                            ("mode", "predefined_conditions"),
-                        ]), "condition")
 
 
 def _page_menu_entry_search_rules(search_options: SearchOptions, mode: str,
@@ -686,6 +681,10 @@ class ModeEditRuleset(WatoMode):
         except KeyError:
             pass
 
+    def _breadcrumb_url(self) -> str:
+        return html.makeuri_contextless([("mode", self.name()), ("varname", self._name)],
+                                        filename="wato.py")
+
     def title(self) -> str:
         assert self._rulespec.title is not None
         title = self._rulespec.title
@@ -697,46 +696,61 @@ class ModeEditRuleset(WatoMode):
 
         return title
 
-    def buttons(self):
-        global_buttons()
+    def page_menu(self, breadcrumb: Breadcrumb) -> PageMenu:
+        menu = PageMenu(
+            dropdowns=[
+                PageMenuDropdown(
+                    name="related",
+                    title=_("Related"),
+                    topics=[
+                        PageMenuTopic(
+                            title=_("Setup"),
+                            entries=list(self._page_menu_entries_related()),
+                        ),
+                    ],
+                ),
+            ],
+            breadcrumb=breadcrumb,
+        )
+        return menu
 
-        if config.user.may('wato.rulesets'):
-            args: HTTPVariables = [
-                ("mode", self._back_mode),
-                ("host", self._hostname),
-            ]
-
-            if self._back_mode == "rulesets":
-                args.append(("group", self._rulespec.main_group_name))
-
-            html.context_button(_("Back"), watolib.folder_preserving_link(args), "back")
-
-        predefined_conditions_button()
+    def _page_menu_entries_related(self) -> Iterable[PageMenuEntry]:
+        yield _page_menu_entry_predefined_conditions()
 
         if self._hostname:
-            html.context_button(
-                _("Services"),
-                watolib.folder_preserving_link([("mode", "inventory"), ("host", self._hostname)]),
-                "services")
+            yield PageMenuEntry(
+                title=_("Services"),
+                icon_name="services",
+                item=make_simple_link(
+                    watolib.folder_preserving_link([("mode", "inventory"),
+                                                    ("host", self._hostname)])),
+            )
 
             if config.user.may('wato.rulesets'):
-                html.context_button(
-                    _("Parameters"),
-                    watolib.folder_preserving_link([("mode", "object_parameters"),
-                                                    ("host", self._hostname),
-                                                    ("service", self._service or self._item)]),
-                    "rulesets")
+                yield PageMenuEntry(
+                    title=_("Parameters"),
+                    icon_name="rulesets",
+                    item=make_simple_link(
+                        watolib.folder_preserving_link([("mode", "object_parameters"),
+                                                        ("host", self._hostname),
+                                                        ("service", self._service or self._item)])),
+                )
 
         if agent_bakery:
-            agent_bakery.agent_bakery_context_button(self._name)
+            yield from agent_bakery.page_menu_entries_agent_bakery(self._name)
 
         if self._name == "logwatch_rules":
-            html.context_button(
-                _("Pattern analyzer"),
-                watolib.folder_preserving_link([
-                    ("mode", "pattern_editor"),
-                    ("host", self._hostname),
-                ]), "logwatch")
+            yield PageMenuEntry(
+                title=_("Pattern analyzer"),
+                icon_name="logwatch",
+                item=make_simple_link(
+                    watolib.folder_preserving_link([
+                        ("mode", "pattern_editor"),
+                        ("host", self._hostname),
+                    ])),
+                is_shortcut=True,
+                is_suggested=True,
+            )
 
     def action(self):
         rule_folder = watolib.Folder.folder(html.request.var("_folder", html.request.var("folder")))
@@ -869,11 +883,11 @@ class ModeEditRuleset(WatoMode):
         if self._hostname:
             table.cell(_("Ma."))
             title, img = self._match(match_state, rule)
-            html.icon(title, "rule%s" % img, middle=True)
+            html.icon("rule%s" % img, title, middle=True)
 
         table.cell("", css="buttons")
         if rule.is_disabled():
-            html.icon(_("This rule is currently disabled and will not be applied"), "disabled")
+            html.icon("disabled", _("This rule is currently disabled and will not be applied"))
         else:
             html.empty_icon()
 
@@ -1062,6 +1076,10 @@ class ModeRuleSearchForm(WatoMode):
     def permissions(cls):
         return ["rulesets"]
 
+    @classmethod
+    def parent_mode(cls) -> Optional[Type[WatoMode]]:
+        return ModeRuleSearch
+
     def __init__(self):
         self.back_mode = html.request.get_ascii_input_mandatory("back_mode", "rulesets")
         super().__init__()
@@ -1071,9 +1089,22 @@ class ModeRuleSearchForm(WatoMode):
             return _("Refine search")
         return _("Search rulesets and rules")
 
-    def buttons(self):
-        global_buttons()
-        html.context_button(_("Back"), html.makeuri([("mode", self.back_mode)]), "back")
+    def page_menu(self, breadcrumb: Breadcrumb) -> PageMenu:
+        menu = make_simple_form_page_menu(breadcrumb,
+                                          form_name="rule_search",
+                                          button_name="_do_search",
+                                          save_title=_("Search"))
+        action_topic = menu.dropdowns[0].topics[0]
+        action_topic.entries.insert(
+            1,
+            PageMenuEntry(
+                title=_("Reset"),
+                icon_name="reset",
+                item=make_form_submit_link("rule_search", "_reset_search"),
+                is_shortcut=True,
+                is_suggested=True,
+            ))
+        return menu
 
     def page(self):
         html.begin_form("rule_search", method="GET")
@@ -1082,8 +1113,6 @@ class ModeRuleSearchForm(WatoMode):
         valuespec = self._valuespec()
         valuespec.render_input_as_form("search", self.search_options)
 
-        html.button("_do_search", _("Search"))
-        html.button("_reset_search", _("Reset"))
         html.hidden_fields()
         html.end_form()
 
@@ -1257,6 +1286,10 @@ def _vs_ruleset_group(mode_name: str) -> DropdownChoice:
 
 
 class EditRuleMode(WatoMode):
+    @classmethod
+    def parent_mode(cls) -> Optional[Type[WatoMode]]:
+        return ModeEditRuleset
+
     def _from_vars(self):
         self._name = html.request.get_ascii_input_mandatory("varname")
 
@@ -1300,7 +1333,8 @@ class EditRuleMode(WatoMode):
     def title(self):
         return _("Edit rule: %s") % self._rulespec.title
 
-    def buttons(self):
+    def page_menu(self, breadcrumb: Breadcrumb) -> PageMenu:
+        # TODO: Is this still needed + for which case?
         if self._back_mode == 'edit_ruleset':
             var_list: HTTPVariables = [
                 ("mode", "edit_ruleset"),
@@ -1319,8 +1353,47 @@ class EditRuleMode(WatoMode):
                 ("host", html.request.get_ascii_input_mandatory("host", ""))
             ])
 
-        html.context_button(_("Abort"), backurl, "abort")
-        predefined_conditions_button()
+        menu = make_simple_form_page_menu(breadcrumb,
+                                          form_name="rule_editor",
+                                          button_name="save",
+                                          abort_url=backurl)
+
+        action_dropdown = menu.dropdowns[0]
+        action_dropdown.topics.append(
+            PageMenuTopic(
+                title=_("For Web API"),
+                entries=[
+                    PageMenuEntry(
+                        title=_("Export for API"),
+                        icon_name="export",
+                        item=make_form_submit_link("rule_editor", "_export_rule"),
+                    ),
+                ],
+            ))
+
+        menu.dropdowns.insert(
+            1,
+            PageMenuDropdown(
+                name="related",
+                title=_("Related"),
+                topics=[
+                    PageMenuTopic(
+                        title=_("Setup"),
+                        entries=list(self._page_menu_entries_related()),
+                    ),
+                ],
+            ))
+
+        return menu
+
+    def _page_menu_entries_related(self) -> Iterable[PageMenuEntry]:
+        yield _page_menu_entry_predefined_conditions()
+
+    def breadcrumb(self) -> Breadcrumb:
+        # Let the ModeRulesetGroup know the group we are currently editing
+        with html.stashed_vars():
+            html.request.set_var("group", self._ruleset.rulespec.main_group_name)
+            return super().breadcrumb()
 
     def action(self):
         if not html.check_transaction():
@@ -1461,11 +1534,8 @@ class EditRuleMode(WatoMode):
 
         forms.end()
 
-        html.button("save", _("Save"))
         html.hidden_fields()
         self._vs_rule_options().set_focus("options")
-        html.button("_export_rule", _("Export"))
-
         html.end_form()
 
     def _show_conditions(self):
@@ -1820,62 +1890,6 @@ class VSExplicitConditions(Transform):
             return html.drain()
 
 
-class LabelCondition(Transform):
-    def __init__(self, title, help_txt):
-        super(LabelCondition, self).__init__(
-            ListOf(
-                Tuple(
-                    orientation="horizontal",
-                    elements=[
-                        DropdownChoice(choices=[
-                            ("is", _("has")),
-                            ("is_not", _("has not")),
-                        ],),
-                        SingleLabel(world=Labels.World.CONFIG,),
-                    ],
-                    show_titles=False,
-                ),
-                add_label=_("Add label condition"),
-                del_label=_("Remove label condition"),
-                style=ListOf.Style.FLOATING,
-                movable=False,
-            ),
-            forth=self._to_valuespec,
-            back=self._from_valuespec,
-            title=title,
-            help=help_txt,
-        )
-
-    def _to_valuespec(self, label_conditions):
-        valuespec_value = []
-        for label_id, label_value in label_conditions.items():
-            valuespec_value.append(self._single_label_to_valuespec(label_id, label_value))
-        return valuespec_value
-
-    def _single_label_to_valuespec(self, label_id, label_value):
-        if isinstance(label_value, dict):
-            if "$ne" in label_value:
-                return ("is_not", {label_id: label_value["$ne"]})
-            raise NotImplementedError()
-        return ("is", {label_id: label_value})
-
-    def _from_valuespec(self, valuespec_value):
-        label_conditions = {}
-        for operator, label in valuespec_value:
-            if label:
-                label_id, label_value = list(label.items())[0]
-                label_conditions[label_id] = self._single_label_from_valuespec(
-                    operator, label_value)
-        return label_conditions
-
-    def _single_label_from_valuespec(self, operator, label_value):
-        if operator == "is":
-            return label_value
-        if operator == "is_not":
-            return {"$ne": label_value}
-        raise NotImplementedError()
-
-
 class RuleConditionRenderer:
     def render(self, rulespec: Rulespec, conditions: RuleConditions) -> List[str]:
         rendered: List[str] = []
@@ -2160,7 +2174,11 @@ class ModeNewRule(EditRuleMode):
 
         else:
             # Submitting the create dialog
-            self._folder = watolib.Folder.folder(self._get_folder_path_from_vars())
+            try:
+                self._folder = watolib.Folder.folder(self._get_folder_path_from_vars())
+            except MKUserError:
+                # Folder can not be gathered from form if an error occurs
+                self._folder = watolib.Folder.folder(html.request.var("rule_folder"))
 
     def _get_folder_path_from_vars(self):
         return self._get_rule_conditions_from_vars().host_folder

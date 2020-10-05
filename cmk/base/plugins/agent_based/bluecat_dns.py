@@ -4,7 +4,7 @@
 # This file is part of Checkmk (https://checkmk.com). It is subject to the terms and
 # conditions defined in the file COPYING, which is part of this source code package.
 
-from .agent_based_api.v0 import (
+from .agent_based_api.v1 import (
     register,
     Service,
     SNMPTree,
@@ -35,7 +35,7 @@ register.snmp_section(
 )
 
 
-def discover_bluecat_dns(section: Section) -> type_defs.DiscoveryGenerator:
+def discover_bluecat_dns(section: Section) -> type_defs.DiscoveryResult:
     """
     >>> list(discover_bluecat_dns({'oper_state': 1}))
     [Service(item=None, parameters={}, labels=[])]
@@ -46,7 +46,7 @@ def discover_bluecat_dns(section: Section) -> type_defs.DiscoveryGenerator:
 def check_bluecat_dns(
     params: type_defs.Parameters,
     section: Section,
-) -> type_defs.CheckGenerator:
+) -> type_defs.CheckResult:
     yield from check_bluecat_operational_state(
         params,
         section,
@@ -56,7 +56,7 @@ def check_bluecat_dns(
 def cluster_check_bluecat_dns(
     params: type_defs.Parameters,
     section: ClusterSection,
-) -> type_defs.CheckGenerator:
+) -> type_defs.CheckResult:
     yield from cluster_check_bluecat_operational_state(
         params,
         section,

@@ -88,6 +88,7 @@ from cmk.gui.plugins.userdb.utils import (
     get_connection,
     cleanup_connection_id,
     release_users_lock,
+    CheckCredentialsResult,
 )
 
 from cmk.utils.type_defs import UserId
@@ -649,7 +650,7 @@ class LDAPUserConnector(UserConnector):
         return result
 
     def _ldap_get_scope(self, scope):
-        # Had "subtree" in Check_MK for several weeks. Better be compatible to both definitions.
+        # Had "subtree" in Checkmk for several weeks. Better be compatible to both definitions.
         if scope in ['sub', 'subtree']:
             return ldap.SCOPE_SUBTREE
         if scope == 'base':
@@ -1068,7 +1069,7 @@ class LDAPUserConnector(UserConnector):
         config.user_connections.append(connection)
 
     # This function only validates credentials, no locked checking or similar
-    def check_credentials(self, user_id, password):
+    def check_credentials(self, user_id, password) -> CheckCredentialsResult:
         self.connect()
 
         # Did the user provide an suffix with his user_id? This might enforce
@@ -1712,7 +1713,7 @@ class LDAPConnectionValuespec(Transform):
             ("user_id_umlauts",
              Transform(DropdownChoice(
                  title=_("Translate Umlauts in User-IDs (deprecated)"),
-                 help=_("Check_MK was not not supporting special characters (like Umlauts) in "
+                 help=_("Checkmk was not not supporting special characters (like Umlauts) in "
                         "User-IDs. To deal with LDAP users having umlauts in their User-IDs "
                         "you had the choice to replace umlauts with other characters. This option "
                         "is still available for compatibility reasons, but you are adviced to use "
@@ -1875,7 +1876,7 @@ class LDAPConnectionValuespec(Transform):
 #   +----------------------------------------------------------------------+
 #   | The LDAP User Connector provides some kind of plugin mechanism to    |
 #   | modulize which ldap attributes are synchronized and how they are     |
-#   | synchronized into Check_MK. The standard attribute plugins           |
+#   | synchronized into Checkmk. The standard attribute plugins           |
 #   | are defnied here.                                                    |
 #   '----------------------------------------------------------------------'
 
@@ -2047,7 +2048,12 @@ def ldap_filter_of_connection(connection_id, *args, **kwargs):
 
 def ldap_sync_simple(user_id, ldap_user, user, user_attr, attr):
     if attr in ldap_user:
-        return {user_attr: ldap_user[attr][0]}
+        attr_value = ldap_user[attr][0]
+        if user_attr != 'disable_notifications':
+            return {user_attr: attr_value}
+        # LDAP attribute in boolean format sends str "TRUE" or "FALSE"
+        if attr_value == 'TRUE':
+            return {user_attr: {'disable': True}}
     return {}
 
 
@@ -2136,7 +2142,7 @@ class LDAPAttributePluginMail(LDAPBuiltinAttributePlugin):
 
     @property
     def help(self):
-        return _('Synchronizes the email of the LDAP user account into Check_MK.')
+        return _('Synchronizes the email of the LDAP user account into Checkmk.')
 
     def lock_attributes(self, params):
         return ['email']

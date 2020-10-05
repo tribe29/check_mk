@@ -16,21 +16,21 @@
 
 from typing import Dict
 
-from cmk.base.plugins.agent_based.utils.liebert import (
+from .utils.liebert import (
     DETECT_LIEBERT,
     parse_liebert_without_unit,
 )
-from .agent_based_api.v0 import (
+from .agent_based_api.v1 import (
     register,
     SNMPTree,
     Service,
     Result,
-    state,
+    State as state,
 )
-from .agent_based_api.v0.type_defs import (
+from .agent_based_api.v1.type_defs import (
     SNMPStringTable,
-    CheckGenerator,
-    DiscoveryGenerator,
+    CheckResult,
+    DiscoveryResult,
 )
 
 ParsedSection = Dict[str, str]
@@ -40,13 +40,13 @@ def parse_liebert_system(string_table: SNMPStringTable) -> ParsedSection:
     return parse_liebert_without_unit(string_table, str)
 
 
-def discover_liebert_system(section: ParsedSection) -> DiscoveryGenerator:
+def discover_liebert_system(section: ParsedSection) -> DiscoveryResult:
     model = section.get('System Model Number')
     if model:
         yield Service(item=model)
 
 
-def check_liebert_system(item: str, section: ParsedSection) -> CheckGenerator:
+def check_liebert_system(item: str, section: ParsedSection) -> CheckResult:
     # Variable 'item' is used to generate the service description.
     # However, only one item per host is expected, which is why it is not
     # used in this check funtion.

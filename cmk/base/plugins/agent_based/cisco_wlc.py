@@ -18,6 +18,7 @@
 ...     ".1.3.6.1.4.1.9.1.2171",
 ...     ".1.3.6.1.4.1.9.1.2371",
 ...     ".1.3.6.1.4.1.9.1.2250",
+...     ".1.3.6.1.4.1.9.1.2391",
 ...     ".1.3.6.1.4.1.9.1.2427",
 ... ))
 True
@@ -32,19 +33,19 @@ False
 
 from typing import Dict, Mapping, Optional
 
-from .agent_based_api.v0 import (
+from .agent_based_api.v1 import (
     SNMPTree,
     register,
     Service,
     Result,
-    state,
+    State as state,
     matches,
 )
-from .agent_based_api.v0.type_defs import (
+from .agent_based_api.v1.type_defs import (
     Parameters,
     SNMPStringTable,
-    CheckGenerator,
-    DiscoveryGenerator,
+    CheckResult,
+    DiscoveryResult,
 )
 
 Section = Dict[str, str]
@@ -62,6 +63,7 @@ VERSION_CISCO_WLC_PATTERN = "|".join((
     ".1.3.6.1.4.1.9.1.2171",
     ".1.3.6.1.4.1.9.1.2371",
     ".1.3.6.1.4.1.9.1.2250",
+    ".1.3.6.1.4.1.9.1.2391",
     ".1.3.6.1.4.1.9.1.2427",
 )).replace(".", r"\.")
 
@@ -80,7 +82,7 @@ def parse_cisco_wlc(string_table: SNMPStringTable) -> Section:
     return dict(string_table[0])  # type: ignore[arg-type]
 
 
-def discovery_cisco_wlc(section: Section) -> DiscoveryGenerator:
+def discovery_cisco_wlc(section: Section) -> DiscoveryResult:
     """
     >>> list(discovery_cisco_wlc({'AP19': '1', 'AP02': '1'}))
     [Service(item='AP19', parameters={}, labels=[]), Service(item='AP02', parameters={}, labels=[])]
@@ -105,12 +107,12 @@ def _ap_info(node: Optional[str], wlc_status: str) -> Result:
     )
 
 
-def check_cisco_wlc(item: str, params: Parameters, section: Section) -> CheckGenerator:
+def check_cisco_wlc(item: str, params: Parameters, section: Section) -> CheckResult:
     """
     >>> list(check_cisco_wlc("AP19", {}, {'AP19': '1', 'AP02': '1'}))
-    [Result(state=<state.OK: 0>, summary='Accesspoint: online', details='Accesspoint: online')]
+    [Result(state=<State.OK: 0>, summary='Accesspoint: online', details='Accesspoint: online')]
     >>> list(check_cisco_wlc("AP18", {}, {'AP19': '1', 'AP02': '1'}))
-    [Result(state=<state.CRIT: 2>, summary='Accesspoint not found', details='Accesspoint not found')]
+    [Result(state=<State.CRIT: 2>, summary='Accesspoint not found', details='Accesspoint not found')]
     """
     if item in section:
         yield _ap_info(None, section[item])
@@ -122,12 +124,12 @@ def cluster_check_cisco_wlc(
     item: str,
     params: Parameters,
     section: Mapping[str, Section],
-) -> CheckGenerator:
+) -> CheckResult:
     """
     >>> list(cluster_check_cisco_wlc("AP19", {}, {"node1": {'AP19': '1', 'AP02': '1'}}))
-    [Result(state=<state.OK: 0>, summary='Accesspoint: online (connected to node1)', details='Accesspoint: online (connected to node1)')]
+    [Result(state=<State.OK: 0>, summary='Accesspoint: online (connected to node1)', details='Accesspoint: online (connected to node1)')]
     >>> list(cluster_check_cisco_wlc("AP18", {}, {"node1": {'AP19': '1', 'AP02': '1'}}))
-    [Result(state=<state.CRIT: 2>, summary='Accesspoint not found', details='Accesspoint not found')]
+    [Result(state=<State.CRIT: 2>, summary='Accesspoint not found', details='Accesspoint not found')]
     """
     for node, node_section in section.items():
         if item in node_section:

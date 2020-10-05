@@ -38,14 +38,22 @@ from cmk.gui.log import logger
 from cmk.gui.globals import html
 from cmk.gui.pagetypes import PagetypeTopics
 from cmk.gui.main_menu import mega_menu_registry
-from cmk.gui.breadcrumb import make_topic_breadcrumb, Breadcrumb, BreadcrumbItem
+from cmk.gui.views import ABCAjaxInitialFilters
+from cmk.gui.pages import page_registry
+from cmk.gui.breadcrumb import (
+    make_topic_breadcrumb,
+    Breadcrumb,
+    BreadcrumbItem,
+    make_current_page_breadcrumb_item,
+)
 from cmk.gui.page_menu import (
     PageMenu,
     PageMenuDropdown,
     PageMenuTopic,
     PageMenuEntry,
-    PageMenuPopup,
+    PageMenuSidePopup,
     make_simple_link,
+    make_simple_form_page_menu,
     make_javascript_link,
     make_display_options_dropdown,
 )
@@ -400,7 +408,7 @@ class LegacyDashlet(cmk.gui.plugins.dashboard.IFrameDashlet):
         return super(LegacyDashlet, self)._get_iframe_url()
 
 
-# Pre Check_MK 1.6 the dashlets were declared with dictionaries like this:
+# Pre Checkmk 1.6 the dashlets were declared with dictionaries like this:
 #
 # dashlet_types["hoststats"] = {
 #     "title"       : _("Host Statistics"),
@@ -740,57 +748,21 @@ def _fallback_dashlet(name: DashboardName, board: DashboardConfig, dashlet_spec:
     return dashlet_type(name, board, dashlet_id, dashlet_spec)
 
 
-# TODO: Use new generic popup dialogs once they are merged from the current UX rework
-# TODO: Synchronize this with the view mechanic
-def _render_filter_form(board: DashboardConfig, board_context: VisualContext,
-                        unconfigured_single_infos: Set[str]) -> str:
-    with html.plugged():
-        html.begin_form("dashboard_context_dialog", method="GET", add_transid=False)
+def _get_mandatory_filters(board: DashboardConfig,
+                           unconfigured_single_infos: Set[str]) -> List[Tuple[str, ValueSpec]]:
+    mandatory_filters: List[Tuple[str, ValueSpec]] = []
 
-        forms.header(_("Dashboard context"))
+    # Get required single info keys (the ones that are not set by the config)
+    for info_key in unconfigured_single_infos:
+        info = visuals.visual_info_registry[info_key]()
+        mandatory_filters += info.single_spec
 
-        try:
-            # Configure required single info keys (the ones that are not set by the config)
-            single_context_filters = []
-            for info_key in unconfigured_single_infos:
-                info = visuals.visual_info_registry[info_key]()
+    # Get required context filters set in the dashboard config
+    if board["mandatory_context_filters"]:
+        for filter_key in board["mandatory_context_filters"]:
+            mandatory_filters.append((filter_key, visuals.VisualFilter(filter_key)))
 
-                for filter_name, valuespec in info.single_spec:
-                    single_context_filters.append(filter_name)
-                    forms.section(valuespec.title())
-                    valuespec.render_input(filter_name, None)
-            forms.section_close()
-
-            # Configure required context filters set in the dashboard config
-            if board["mandatory_context_filters"]:
-                forms.section(_("Required context"))
-                for filter_key in board["mandatory_context_filters"]:
-                    valuespec = visuals.VisualFilter(filter_key)
-                    valuespec.render_input(filter_key, board_context.get(filter_key))
-
-            # Give the user the option to redefine filters configured in the dashboard config
-            # and also give the option to add some additional filters
-            forms.section(_("Additional context"))
-            # Like _dashboard_info_handler we assume that only host / service filters are relevant
-            vs_filters = visuals.VisualFilterList(info_list=["host", "service"],
-                                                  ignore=board["mandatory_context_filters"] +
-                                                  single_context_filters)
-            vs_filters.render_input("", board_context)
-        except Exception:
-            crash_reporting.handle_exception_as_gui_crash_report()
-
-        html.open_tr()
-        html.open_td(colspan=2)
-        html.button("_submit", _("Update"))
-        html.close_td()
-        html.close_tr()
-
-        forms.end()
-
-        html.hidden_fields()
-        html.end_form()
-
-        return html.drain()
+    return mandatory_filters
 
 
 def _page_menu(breadcrumb: Breadcrumb, name: DashboardName, board: DashboardConfig,
@@ -872,6 +844,10 @@ def _extend_display_dropdown(menu: PageMenu, board: DashboardConfig, board_conte
                              unconfigured_single_infos: Set[str]) -> None:
     display_dropdown = menu.get_dropdown_by_name("display", make_display_options_dropdown())
 
+    mandatory_filters = _get_mandatory_filters(board, unconfigured_single_infos)
+    # Like _dashboard_info_handler we assume that only host / service filters are relevant
+    info_list = ["host", "service"]
+
     display_dropdown.topics.insert(
         0,
         PageMenuTopic(title=_("Filter"),
@@ -879,13 +855,23 @@ def _extend_display_dropdown(menu: PageMenu, board: DashboardConfig, board_conte
                           PageMenuEntry(
                               title=_("Filter"),
                               icon_name="filters",
-                              item=PageMenuPopup(
-                                  _render_filter_form(board, board_context,
-                                                      unconfigured_single_infos)),
+                              item=PageMenuSidePopup(
+                                  visuals.render_filter_form(info_list, mandatory_filters,
+                                                             board_context, board["name"],
+                                                             "ajax_initial_dashboard_filters")),
                               name="filters",
                               is_shortcut=True,
                           ),
                       ]))
+
+
+@page_registry.register_page("ajax_initial_dashboard_filters")
+class AjaxInitialDashboardFilters(ABCAjaxInitialFilters):
+    def _get_context(self, page_name: str) -> Dict:
+        dashboard_name = page_name
+        board = _load_dashboard_with_cloning(get_permitted_dashboards(), dashboard_name, edit=False)
+        board = _add_context_to_dashboard(board)
+        return board["context"]
 
 
 def _dashboard_add_dashlet_entries(name: DashboardName, board: DashboardConfig,
@@ -1251,19 +1237,16 @@ def choose_view(name: DashboardName, title: str, create_dashlet_spec_func: Calla
         sorted=True,
     )
 
-    html.header(title, breadcrumb=visuals.visual_page_breadcrumb("dashboards", title, "edit"))
-    html.begin_context_buttons()
-    back_url = html.get_url_input(
-        "back", "dashboard.py?edit=1&name=%s" % html.urlencode(html.request.var('name')))
-    html.context_button(_("Back"), back_url, "back")
-    html.end_context_buttons()
+    dashboard = get_permitted_dashboards()[name]
+
+    breadcrumb = _dashlet_editor_breadcrumb(name, dashboard, title)
+    html.header(title, breadcrumb=breadcrumb, page_menu=_choose_view_page_menu(breadcrumb))
 
     if html.request.var('save') and html.check_transaction():
         try:
             view_name = vs_view.from_html_vars('view')
             vs_view.validate_value(view_name, 'view')
 
-            dashboard = get_permitted_dashboards()[name]
             dashlet_id = len(dashboard['dashlets'])
             dashlet_spec = create_dashlet_spec_func(dashlet_id, view_name)
             add_dashlet(dashlet_spec, dashboard)
@@ -1273,7 +1256,7 @@ def choose_view(name: DashboardName, title: str, create_dashlet_spec_func: Calla
                     [
                         ("name", name),
                         ("id", str(dashlet_id)),
-                        ("back", back_url),
+                        ("back", html.get_url_input('back')),
                     ],
                     filename="edit_dashlet.py",
                 ))
@@ -1287,11 +1270,16 @@ def choose_view(name: DashboardName, title: str, create_dashlet_spec_func: Calla
     html.help(vs_view.help())
     forms.end()
 
-    html.button('save', _('Continue'), 'submit')
-
     html.hidden_fields()
     html.end_form()
     html.footer()
+
+
+def _choose_view_page_menu(breadcrumb: Breadcrumb) -> PageMenu:
+    return make_simple_form_page_menu(breadcrumb,
+                                      form_name="choose_view",
+                                      button_name="save",
+                                      save_title=_("Continue"))
 
 
 @cmk.gui.pages.register("edit_dashlet")
@@ -1359,14 +1347,8 @@ def page_edit_dashlet() -> None:
         dashlet_type = dashlet_registry[ty]
         single_infos = cast(List[str], dashlet_spec['single_infos'])
 
-    html.header(title, breadcrumb=visuals.visual_page_breadcrumb("dashboards", title, mode))
-
-    html.begin_context_buttons()
-    back_url = html.get_url_input('back')
-    next_url = html.get_url_input('next', back_url)
-    html.context_button(_('Back'), back_url, 'back')
-    html.context_button(_('All Dashboards'), 'edit_dashboards.py', 'dashboard')
-    html.end_context_buttons()
+    breadcrumb = _dashlet_editor_breadcrumb(board, dashboard, title)
+    html.header(title, breadcrumb=breadcrumb, page_menu=_dashlet_editor_page_menu(breadcrumb))
 
     vs_general = Dictionary(
         title=_('General Settings'),
@@ -1468,6 +1450,7 @@ def page_edit_dashlet() -> None:
 
             save_all_dashboards()
 
+            next_url = html.get_url_input('next', html.get_url_input('back'))
             html.immediate_browser_redirect(1, next_url)
             if mode == 'edit':
                 html.show_message(_('The dashlet has been saved.'))
@@ -1497,6 +1480,24 @@ def page_edit_dashlet() -> None:
     html.end_form()
 
     html.footer()
+
+
+def _dashlet_editor_page_menu(breadcrumb: Breadcrumb) -> PageMenu:
+    return make_simple_form_page_menu(breadcrumb, form_name="dashlet", button_name="save")
+
+
+def _dashlet_editor_breadcrumb(name: str, board: DashboardConfig, title: str) -> Breadcrumb:
+    breadcrumb = make_topic_breadcrumb(mega_menu_registry.menu_monitoring(),
+                                       PagetypeTopics.get_topic(board["topic"]))
+    breadcrumb.append(
+        BreadcrumbItem(
+            visuals.visual_title('dashboard', board),
+            html.get_url_input('back'),
+        ))
+
+    breadcrumb.append(make_current_page_breadcrumb_item(title))
+
+    return breadcrumb
 
 
 @cmk.gui.pages.register("clone_dashlet")

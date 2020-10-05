@@ -4,190 +4,159 @@
 # This file is part of Checkmk (https://checkmk.com). It is subject to the terms and
 # conditions defined in the file COPYING, which is part of this source code package.
 
-import sys
+import logging
 import socket
-from pathlib import Path
 
-import importlib
-
-from typing import List
-
+import pyghmi.exceptions  # type: ignore[import]
 import pytest  # type: ignore[import]
 
-import cmk.fetchers.controller
-
-from cmk.fetchers.controller import (
-    Header,
-    make_failure_answer,
-    make_success_answer,
-    make_waiting_answer,
-    build_json_file_path,
-    build_json_global_config_file_path,
-    run_fetchers,
-    load_global_config,
+import cmk.utils.log as log
+from cmk.utils.exceptions import (
+    MKBailOut,
+    MKException,
+    MKGeneralException,
+    MKIPAddressLookupError,
+    MKSNMPError,
+    MKTerminate,
+    MKTimeout,
+)
+from cmk.utils.paths import core_helper_config_dir
+from cmk.utils.type_defs import (
+    AgentRawData,
+    ConfigSerial,
+    ErrorResult,
+    OKResult,
+    Result,
+    SectionName,
 )
 
-from cmk.base.fetcher_config import FetcherConfig
-from cmk.fetchers.tcp import TCPFetcher
+from cmk.snmplib.type_defs import SNMPRawData, SNMPTable
 
-from cmk.utils.paths import core_fetcher_config_dir
-import cmk.utils.paths
-import cmk.utils.log
+from cmk.fetchers import FetcherType
+from cmk.fetchers.controller import (
+    AgentPayload,
+    build_json_file_path,
+    build_json_global_config_file_path,
+    cmc_log_level_from_python,
+    CMCHeader,
+    CmcLogLevel,
+    ErrorPayload,
+    FetcherHeader,
+    FetcherMessage,
+    make_logging_answer,
+    make_payload_answer,
+    make_waiting_answer,
+    PayloadType,
+    run_fetcher,
+    SNMPPayload,
+    write_bytes,
+)
+from cmk.fetchers.type_defs import Mode
 
-import testlib.base as base
+
+@pytest.mark.parametrize("status,log_level", [
+    (logging.CRITICAL, CmcLogLevel.CRITICAL),
+    (logging.ERROR, CmcLogLevel.ERROR),
+    (logging.WARNING, CmcLogLevel.WARNING),
+    (logging.INFO, CmcLogLevel.INFO),
+    (log.VERBOSE, CmcLogLevel.INFO),
+    (logging.DEBUG, CmcLogLevel.DEBUG),
+    (5, CmcLogLevel.WARNING),
+])
+def test_status_to_log_level(status, log_level):
+    assert log_level == cmc_log_level_from_python(status)
 
 
 class TestControllerApi:
     def test_controller_success(self):
-        assert make_success_answer(data="payload") == "fetch:SUCCESS:        :7       :payload"
+        payload = AgentPayload(69 * b"\0")
+        header = FetcherHeader(
+            FetcherType.TCP,
+            PayloadType.AGENT,
+            status=42,
+            payload_length=len(payload),
+        )
+        message = FetcherMessage(header, payload)
+        assert len(message) == 89
+        assert make_payload_answer(message) == (b"fetch:SUCCESS:        :89      :" + header +
+                                                payload)
 
     def test_controller_failure(self):
-        assert make_failure_answer(
-            data="payload", severity="crit12345678") == "fetch:FAILURE:crit1234:7       :payload"
+        assert make_logging_answer(
+            "payload", log_level=CmcLogLevel.WARNING) == b"fetch:FAILURE:warning :7       :payload"
 
     def test_controller_waiting(self):
-        assert make_waiting_answer() == "fetch:WAITING:        :0       :"
+        assert make_waiting_answer() == b"fetch:WAITING:        :0       :"
 
     def test_build_json_file_path(self):
-        assert build_json_file_path(
-            serial="_serial_",
-            host_name="buzz") == Path(core_fetcher_config_dir) / "_serial_" / "buzz.json"
+        assert build_json_file_path(serial=ConfigSerial("_serial_"),
+                                    host_name="buzz") == (core_helper_config_dir / "_serial_" /
+                                                          "fetchers" / "hosts" / "buzz.json")
 
     def test_build_json_global_config_file_path(self):
-        assert build_json_global_config_file_path(
-            serial="_serial_") == Path(core_fetcher_config_dir) / "_serial_" / "global_config.json"
+        assert build_json_global_config_file_path(serial=ConfigSerial(
+            "_serial_")) == core_helper_config_dir / "_serial_" / "fetchers" / "global_config.json"
 
-    @pytest.fixture
-    def scenario(self, monkeypatch, tmp_path):
-        def write_to_stdout(data: str) -> None:
-            sys.stdout.write(data)
+    def test_run_fetcher_with_failure(self):
+        message = run_fetcher(
+            {
+                "fetcher_type": "SNMP",
+                "trash": 1
+            },
+            Mode.CHECKING,
+        )
+        assert message.header.fetcher_type is FetcherType.SNMP
+        assert message.header.status == 50
+        assert message.header.payload_length == len(message) - len(message.header)
+        assert type(message.raw_data.error) is KeyError  # pylint: disable=C0123
+        assert str(message.raw_data.error) == repr("fetcher_params")
 
-        ts = base.Scenario()
-        ts.add_host("heute")
-        ts.add_host("rrd_host")
-        ts.set_option("ipaddresses", {"heute": "127.0.0.1", "rrd_host": "127.0.0.2"})
-        ts.apply(monkeypatch)
+    def test_run_fetcher_with_exception(self):
+        with pytest.raises(RuntimeError):
+            run_fetcher({"trash": 1}, Mode.CHECKING)
 
-        def _dummy_connect(s):
-            s._socket = socket.socket(s._family, socket.SOCK_STREAM)
-            return s
-
-        # Prevent agent communication
-        monkeypatch.setattr(TCPFetcher, "__enter__", _dummy_connect)
-        monkeypatch.setattr(TCPFetcher, "_raw_data", lambda self: b"<<<check_mk>>>abc")
-
-        monkeypatch.setattr("cmk.utils.paths.core_fetcher_config_dir", tmp_path)
-        importlib.reload(cmk.fetchers.controller)
-
-        # write_out cannot be used with capsys - monkeypatching this!
-        # More complicated method of testing may be written in the future
-        monkeypatch.setattr(cmk.fetchers.controller, "write_data", write_to_stdout)
-
-    @pytest.fixture
-    def scenario_short(self, monkeypatch, tmp_path):
-        monkeypatch.setattr("cmk.utils.paths.core_fetcher_config_dir", tmp_path)
-        importlib.reload(cmk.fetchers.controller)
-
-        fetcher_config = FetcherConfig()
-        fetcher_config.write_global()
-
-    @staticmethod
-    @pytest.fixture
-    def expected_error() -> str:
-        return 'TCP: Not connected'
-
-    @staticmethod
-    @pytest.fixture
-    def write_config() -> int:
-        ff = FetcherConfig()
-        ff.write("heute")
-        return ff.serial
-
-    @staticmethod
-    @pytest.fixture
-    def expected_blob() -> str:
-        def make_blob(fetcher: str, status: int, payload: str) -> str:
-            return '{"fetcher_type": "%s", "status": %d, "payload": "%s"}' % (fetcher, status,
-                                                                              payload)
-
-        return '[%s, %s]' % (make_blob("TCP", 0, "<<<check_mk>>>abc"), make_blob(
-            "PIGGYBACK", 0, ""))
-
-    @pytest.mark.parametrize("the_host", ["heute", "rrd_host"])
-    @pytest.mark.usefixtures("scenario")
-    def test_run_fetchers(self, the_host, capsys, expected_error, expected_blob):
-        fetcher_config = FetcherConfig()
-        fetcher_config.write(hostname=the_host)
-        run_fetchers(serial=str(fetcher_config.serial), host_name=the_host, timeout=35)
-        captured = capsys.readouterr()
-        assert captured.out == make_success_answer(expected_blob) + make_waiting_answer()
-
-    @pytest.mark.usefixtures("scenario")
-    def test_run_fetchers_bad_file(self, capsys, write_config):
-        run_fetchers(serial=str(write_config), host_name="zzz", timeout=35)
-        captured = capsys.readouterr()
-        text = f"fetcher file for host 'zzz' and {write_config} is absent"
-        assert captured.out == make_success_answer(text) + make_failure_answer(
-            text, severity="warning") + make_waiting_answer()
-
-    @pytest.mark.usefixtures("scenario")
-    def test_run_fetchers_bad_serial(self, capsys, write_config):
-        run_fetchers(serial=str(write_config + 1), host_name="heute", timeout=35)
-        captured = capsys.readouterr()
-        text = f"fetcher file for host 'heute' and {write_config + 1} is absent"
-        assert captured.out == make_success_answer(text) + make_failure_answer(
-            text, severity="warning") + make_waiting_answer()
-
-    @pytest.mark.usefixtures("scenario_short")
-    def test_log_level(self, capsys, monkeypatch):
-        result: List[int] = []
-
-        def set_level(level: int):
-            result.append(level)
-
-        monkeypatch.setattr(cmk.utils.log.logger, "setLevel", set_level)
-
-        load_global_config(13)
-        captured = capsys.readouterr()
-        assert captured.out == ""
-        assert result == [5]
+    def test_write_bytes(self, capfdbinary):
+        write_bytes(b"123")
+        captured = capfdbinary.readouterr()
+        assert captured.out == b"123"
+        assert captured.err == b""
 
 
-class TestHeader:
-    @pytest.mark.parametrize("state", [Header.State.SUCCESS, "SUCCESS"])
+class TestCMCHeader:
+    @pytest.mark.parametrize("state", [CMCHeader.State.SUCCESS, "SUCCESS"])
     def test_success_header(self, state):
-        header = Header("name", state, "crit", 41)
-        assert str(header) == "name :SUCCESS:crit    :41      :"
+        header = CMCHeader("name", state, "crit", 41)
+        assert header == b"name :SUCCESS:crit    :41      :"
 
-    @pytest.mark.parametrize("state", [Header.State.FAILURE, "FAILURE"])
+    @pytest.mark.parametrize("state", [CMCHeader.State.FAILURE, "FAILURE"])
     def test_failure_header(self, state):
-        header = Header("fetch", state, "crit", 42)
-        assert str(header) == "fetch:FAILURE:crit    :42      :"
+        header = CMCHeader("fetch", state, "crit", 42)
+        assert header == b"fetch:FAILURE:crit    :42      :"
 
-    def test_from_network(self):
-        header = Header("fetch", "SUCCESS", "crit", 42)
-        assert Header.from_network(str(header) + 42 * "*") == header
+    def test_from_bytes(self):
+        header = CMCHeader("fetch", "SUCCESS", "crit", 42)
+        assert CMCHeader.from_bytes(bytes(header) + 42 * b"*") == header
 
     def test_clone(self):
-        header = Header("name", Header.State.SUCCESS, "crit", 42)
+        header = CMCHeader("name", CMCHeader.State.SUCCESS, "crit", 42)
         other = header.clone()
         assert other is not header
         assert other == header
 
     def test_eq(self):
-        header = Header("name", Header.State.SUCCESS, "crit", 42)
-        assert header == str(header)
-        assert str(header) == header
+        header = CMCHeader("name", CMCHeader.State.SUCCESS, "crit", 42)
+        assert header == bytes(header)
+        assert bytes(header) == header
 
     def test_neq(self):
-        header = Header("name", Header.State.SUCCESS, "crit", 42)
+        header = CMCHeader("name", CMCHeader.State.SUCCESS, "crit", 42)
 
         other_name = header.clone()
         other_name.name = "toto"
         assert header != other_name
 
         other_state = header.clone()
-        other_state.state = Header.State.FAILURE
+        other_state.state = CMCHeader.State.FAILURE
         assert header != other_state
 
         other_crit = header.clone()
@@ -199,21 +168,277 @@ class TestHeader:
         assert header != other_len
 
     def test_repr(self):
-        header = Header("name", "SUCCESS", "crit", 42)
+        header = CMCHeader("name", "SUCCESS", "crit", 42)
         assert isinstance(repr(header), str)
 
     def test_hash(self):
-        header = Header("name", "SUCCESS", "crit", 42)
-        assert hash(header) == hash(str(header))
+        header = CMCHeader("name", "SUCCESS", "crit", 42)
+        assert hash(header) == hash(bytes(header))
 
     def test_len(self):
-        header = Header("name", "SUCCESS", "crit", 42)
-        assert len(header) == len(str(header))
+        header = CMCHeader("name", "SUCCESS", "crit", 42)
+        assert len(header) == len(bytes(header))
 
     def test_critical_constants(self):
         """ ATTENTION: Changing of those constants may require changing of C++ code"""
-        assert Header.length == 32
-        assert Header.State.FAILURE == "FAILURE"
-        assert Header.State.SUCCESS == "SUCCESS"
-        assert Header.State.WAITING == "WAITING"
-        assert Header.default_protocol_name() == "fetch"
+        assert CMCHeader.length == 32
+        assert CMCHeader.State.FAILURE == "FAILURE"
+        assert CMCHeader.State.SUCCESS == "SUCCESS"
+        assert CMCHeader.State.WAITING == "WAITING"
+        assert CMCHeader.default_protocol_name() == "fetch"
+
+
+class TestAgentPayload:
+    @pytest.fixture
+    def payload(self):
+        return AgentPayload(b"<<<hello>>>\nworld")
+
+    def test_from_bytes_success(self, payload):
+        assert AgentPayload.from_bytes(bytes(payload)) == payload
+
+
+class TestSNMPPayload:
+    @pytest.fixture
+    def payload(self):
+        table: SNMPTable = []
+        return SNMPPayload({SectionName("name"): table})
+
+    def test_from_bytes_success(self, payload):
+        assert SNMPPayload.from_bytes(bytes(payload)) == payload
+
+
+class TestErrorPayload:
+    @pytest.fixture(params=[
+        # Our special exceptions.
+        MKException,
+        MKGeneralException,
+        MKTerminate,
+        MKBailOut,
+        MKTimeout,
+        MKSNMPError,
+        MKIPAddressLookupError,
+        # Python exceptions
+        KeyError,
+        LookupError,
+        SyntaxError,
+        ValueError,
+        # Nested Python exceptions
+        socket.herror,
+        socket.timeout,
+        # Third-party exceptions
+        pyghmi.exceptions.IpmiException,
+    ])
+    def error(self, request):
+        return ErrorPayload(request.param("a very helpful message"))
+
+    def test_from_bytes_success(self, error):
+        other = ErrorPayload.from_bytes(bytes(error))
+        assert other is not error
+        assert other == error
+        assert type(other.result().error) == type(error.result().error)  # pylint: disable=C0123
+        assert other.result().error.args == error.result().error.args
+
+    def test_from_bytes_failure(self):
+        with pytest.raises(ValueError):
+            ErrorPayload.from_bytes(b"random bytes")
+
+    def test_hash(self, error):
+        assert hash(error) == hash(bytes(error))
+
+    def test_len(self, error):
+        assert len(error) == len(bytes(error))
+
+
+class TestFetcherHeader:
+    @pytest.fixture
+    def header(self):
+        return FetcherHeader(
+            FetcherType.TCP,
+            PayloadType.AGENT,
+            status=42,
+            payload_length=69,
+        )
+
+    def test_from_bytes_success(self, header):
+        assert FetcherHeader.from_bytes(bytes(header) + 42 * b"*") == header
+
+    def test_from_bytes_failure(self):
+        with pytest.raises(ValueError):
+            FetcherHeader.from_bytes(b"random bytes")
+
+    def test_repr(self, header):
+        assert isinstance(repr(header), str)
+
+    def test_hash(self, header):
+        assert hash(header) == hash(bytes(header))
+
+    def test_len(self, header):
+        assert len(header) == len(bytes(header))
+        assert len(header) == FetcherHeader.length
+
+
+class TestFetcherHeaderEq:
+    @pytest.fixture
+    def fetcher_type(self):
+        return FetcherType.NONE
+
+    @pytest.fixture
+    def payload_type(self):
+        return PayloadType.AGENT
+
+    @pytest.fixture
+    def status(self):
+        return 42
+
+    @pytest.fixture
+    def payload_length(self):
+        return 69
+
+    @pytest.fixture
+    def header(self, fetcher_type, payload_type, status, payload_length):
+        return FetcherHeader(
+            fetcher_type,
+            payload_type,
+            status=status,
+            payload_length=payload_length,
+        )
+
+    def test_eq(self, header, fetcher_type, payload_type, status, payload_length):
+        assert header == bytes(header)
+        assert bytes(header) == header
+        assert bytes(header) == bytes(header)
+        assert header == FetcherHeader(
+            fetcher_type,
+            payload_type,
+            status=status,
+            payload_length=payload_length,
+        )
+
+    def test_neq_other_payload_type(self, header):
+        other = FetcherType.TCP
+        assert other != header.payload_type
+
+        assert header != FetcherHeader(
+            other,
+            payload_type=header.payload_type,
+            status=header.status,
+            payload_length=header.payload_length,
+        )
+
+    def test_neq_other_result_type(self, header):
+        other = PayloadType.ERROR
+        assert other != header.payload_type
+
+        assert header != FetcherHeader(
+            header.fetcher_type,
+            other,
+            status=header.status,
+            payload_length=header.payload_length,
+        )
+
+    def test_neq_other_status(self, header, status):
+        other = status + 1
+        assert other != header.status
+
+        assert header != FetcherHeader(
+            header.fetcher_type,
+            header.payload_type,
+            status=other,
+            payload_length=header.payload_length,
+        )
+
+    def test_neq_other_payload_length(self, header, payload_length):
+        other = payload_length + 1
+        assert other != header.payload_length
+
+        assert header != FetcherHeader(
+            header.fetcher_type,
+            header.payload_type,
+            status=header.status,
+            payload_length=other,
+        )
+
+    def test_add(self, header, payload_length):
+        payload = payload_length * b"\0"
+
+        message = header + payload
+        assert isinstance(message, bytes)
+        assert len(message) == len(header) + len(payload)
+        assert FetcherHeader.from_bytes(message) == header
+        assert FetcherHeader.from_bytes(message[:len(header)]) == header
+        assert message[len(header):] == payload
+
+
+class TestFetcherMessage:
+    @pytest.fixture
+    def header(self):
+        return FetcherHeader(
+            FetcherType.TCP,
+            PayloadType.AGENT,
+            status=42,
+            payload_length=69,
+        )
+
+    @pytest.fixture
+    def payload(self, header):
+        return AgentPayload(b"\0" * (header.payload_length - AgentPayload.length))
+
+    @pytest.fixture
+    def message(self, header, payload):
+        return FetcherMessage(header, payload)
+
+    def test_accessors(self, message, header, payload):
+        assert message.header == header
+
+    def test_from_bytes_success(self, message):
+        assert FetcherMessage.from_bytes(bytes(message) + 42 * b"*") == message
+
+    def test_from_bytes_failure(self):
+        with pytest.raises(ValueError):
+            FetcherMessage.from_bytes(b"random bytes")
+
+    def test_len(self, message, header, payload):
+        assert len(message) == len(header) + len(payload)
+
+    def test_from_raw_data_tcp(self):
+        result: Result[AgentRawData, Exception] = OKResult(b"<<<check_mk>>>Hallo")
+        message = FetcherMessage.from_raw_data(result, FetcherType.TCP)
+        assert message.header.fetcher_type is FetcherType.TCP
+        assert message.header.payload_type is PayloadType.AGENT
+        assert message.raw_data == result
+
+    def test_from_raw_data_snmp(self):
+        table: SNMPTable = [[[6500337, 11822045]]]
+        raw_data: SNMPRawData = {SectionName('snmp_uptime'): table}
+        result: Result[SNMPRawData, Exception] = OKResult(raw_data)
+        message = FetcherMessage.from_raw_data(result, FetcherType.SNMP)
+        assert message.header.fetcher_type is FetcherType.SNMP
+        assert message.header.payload_type is PayloadType.SNMP
+        assert message.raw_data == result
+
+    def test_from_raw_data_exception(self):
+        error: Result[AgentRawData, Exception] = ErrorResult(ValueError("zomg!"))
+        message = FetcherMessage.from_raw_data(error, FetcherType.TCP)
+        assert message.header.fetcher_type is FetcherType.TCP
+        assert message.header.payload_type is PayloadType.ERROR
+        # Comparison of exception is "interesting" in Python so we check the type and args.
+        assert type(message.raw_data.error) is type(error.error)
+        assert message.raw_data.error.args == error.error.args
+
+    def test_raw_data_tcp(self):
+        result: Result[AgentRawData, Exception] = OKResult(b"<<<check_mk>>>Hallo")
+        message = FetcherMessage.from_raw_data(result, FetcherType.TCP)
+        assert message.raw_data == result
+
+    def test_raw_data_snmp(self):
+        table: SNMPTable = [[[6500337, 11822045]]]
+        raw_data: SNMPRawData = {SectionName('snmp_uptime'): table}
+        result: Result[SNMPRawData, Exception] = OKResult(raw_data)
+        message = FetcherMessage.from_raw_data(result, FetcherType.SNMP)
+        assert message.raw_data == result
+
+    def test_raw_data_exception(self):
+        result: Result[AgentRawData, Exception] = ErrorResult(Exception("zomg!"))
+        message = FetcherMessage.from_raw_data(result, FetcherType.TCP)
+        assert isinstance(message.raw_data.error, Exception)
+        assert str(message.raw_data.error) == "zomg!"

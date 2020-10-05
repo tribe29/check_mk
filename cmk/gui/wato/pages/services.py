@@ -28,17 +28,20 @@ from cmk.gui.pages import page_registry, AjaxPage
 from cmk.gui.globals import html
 from cmk.gui.i18n import _
 from cmk.gui.exceptions import MKUserError, MKGeneralException
-from cmk.gui.breadcrumb import Breadcrumb
+from cmk.gui.breadcrumb import Breadcrumb, make_main_menu_breadcrumb
 from cmk.gui.page_menu import (
     PageMenu,
     PageMenuDropdown,
     PageMenuTopic,
     PageMenuEntry,
+    PageMenuRenderer,
+    PageMenuCheckbox,
     enable_page_menu_entry,
     disable_page_menu_entry,
     make_display_options_dropdown,
     make_simple_link,
     make_javascript_link,
+    make_javascript_action,
 )
 
 from cmk.gui.watolib import (
@@ -246,10 +249,32 @@ class ModeAjaxServiceDiscovery(AjaxPage):
             "job_state": discovery_result.job_status["state"],
             "message": self._get_status_message(discovery_result, performed_action),
             "body": page_code,
+            "page_menu": self._get_page_menu(),
             "pending_changes_info": get_pending_changes_info(),
             "discovery_options": self._options._asdict(),
             "discovery_result": repr(tuple(discovery_result)),
         }
+
+    def _get_page_menu(self) -> str:
+        """Render the page menu contents to reflect contect changes
+
+        The page menu needs to be updated, just like the body of the page. We previously tried an
+        incremental approach (render the page menu once and update it's elements later during each
+        refresh), but it was a lot more complex to realize and resulted in inconsistencies. This is
+        the simpler solution and less error prone.
+        """
+        page_menu = service_page_menu(self._get_discovery_breadcrumb(), self._host, self._options)
+        with html.plugged():
+            PageMenuRenderer().show(
+                page_menu,
+                hide_suggestions=not html.foldable_container_is_open("suggestions", "all", True))
+            return html.drain()
+
+    def _get_discovery_breadcrumb(self) -> Breadcrumb:
+        with html.stashed_vars():
+            html.request.set_var("host", self._host.name())
+            mode = ModeDiscovery()
+            return make_main_menu_breadcrumb(mode.main_menu()) + mode.breadcrumb()
 
     def _get_status_message(self, discovery_result: DiscoveryResult,
                             performed_action: str) -> Optional[str]:
@@ -584,7 +609,7 @@ class DiscoveryPageRenderer:
         self._show_actions(table, discovery_result, check)
 
         table.cell(_("State"), statename, css=stateclass)
-        table.cell(_("Service"), escaping.escape_attribute(descr))
+        table.cell(_("Service"), escaping.escape_attribute(descr), css="service")
         table.cell(_("Status detail"))
         self._show_status_detail(table_source, check_type, item, descr, output)
 
@@ -1164,17 +1189,14 @@ def _extend_help_dropdown(menu: PageMenu) -> None:
 
 def _page_menu_entry_show_parameters(host: watolib.CREHost,
                                      options: DiscoveryOptions) -> PageMenuEntry:
-    if options.show_parameters:
-        params_options = options._replace(show_parameters=False)
-        params_title = _("Hide check parameters")
-    else:
-        params_options = options._replace(show_parameters=True)
-        params_title = _("Show check parameters")
-
     return PageMenuEntry(
-        title=params_title,
-        icon_name="check_parameters",
-        item=make_javascript_link(_start_js_call(host, params_options)),
+        title=_("Show check parameters"),
+        icon_name="trans",
+        item=PageMenuCheckbox(
+            is_checked=options.show_parameters,
+            check_url=_checkbox_js_url(host, options._replace(show_parameters=True)),
+            uncheck_url=_checkbox_js_url(host, options._replace(show_parameters=False)),
+        ),
         is_advanced=True,
         name="show_parameters",
         css_classes=["toggle"],
@@ -1183,35 +1205,33 @@ def _page_menu_entry_show_parameters(host: watolib.CREHost,
 
 def _page_menu_entry_show_checkboxes(host: watolib.CREHost,
                                      options: DiscoveryOptions) -> PageMenuEntry:
-    if not options.show_checkboxes:
-        checkbox_options = options._replace(show_checkboxes=True)
-        checkbox_title = _('Show checkboxes')
-    else:
-        checkbox_options = options._replace(show_checkboxes=False)
-        checkbox_title = _('Hide checkboxes')
-
     return PageMenuEntry(
-        title=checkbox_title,
-        icon_name="checkbox",
-        item=make_javascript_link(_start_js_call(host, checkbox_options)),
+        title=_("Show checkboxes"),
+        icon_name="trans",
+        item=PageMenuCheckbox(
+            is_checked=options.show_checkboxes,
+            check_url=_checkbox_js_url(host, options._replace(show_checkboxes=True)),
+            uncheck_url=_checkbox_js_url(host, options._replace(show_checkboxes=False)),
+        ),
         name="show_checkboxes",
         css_classes=["toggle"],
     )
 
 
+def _checkbox_js_url(host: watolib.CREHost, options: DiscoveryOptions) -> str:
+    return "javascript:%s" % make_javascript_action(_start_js_call(host, options))
+
+
 def _page_menu_entry_show_discovered_labels(host: watolib.CREHost,
                                             options: DiscoveryOptions) -> PageMenuEntry:
-    if options.show_discovered_labels:
-        params_options = options._replace(show_discovered_labels=False)
-        params_title = _("Hide discovered labels")
-    else:
-        params_options = options._replace(show_discovered_labels=True)
-        params_title = _("Show discovered labels")
-
     return PageMenuEntry(
-        title=params_title,
-        icon_name="checkbox",
-        item=make_javascript_link(_start_js_call(host, params_options)),
+        title=_("Show discovered labels"),
+        icon_name="trans",
+        item=PageMenuCheckbox(
+            is_checked=options.show_discovered_labels,
+            check_url=_checkbox_js_url(host, options._replace(show_discovered_labels=True)),
+            uncheck_url=_checkbox_js_url(host, options._replace(show_discovered_labels=False)),
+        ),
         is_advanced=True,
         name="show_discovered_labels",
         css_classes=["toggle"],
@@ -1220,17 +1240,14 @@ def _page_menu_entry_show_discovered_labels(host: watolib.CREHost,
 
 def _page_menu_entry_show_plugin_names(host: watolib.CREHost,
                                        options: DiscoveryOptions) -> PageMenuEntry:
-    if options.show_plugin_names:
-        params_options = options._replace(show_plugin_names=False)
-        params_title = _("Hide plugin names")
-    else:
-        params_options = options._replace(show_plugin_names=True)
-        params_title = _("Show plugin names")
-
     return PageMenuEntry(
-        title=params_title,
-        icon_name="checkbox",
-        item=make_javascript_link(_start_js_call(host, params_options)),
+        title=_("Show plugin names"),
+        icon_name="trans",
+        item=PageMenuCheckbox(
+            is_checked=options.show_plugin_names,
+            check_url=_checkbox_js_url(host, options._replace(show_plugin_names=True)),
+            uncheck_url=_checkbox_js_url(host, options._replace(show_plugin_names=False)),
+        ),
         is_advanced=True,
         name="show_plugin_names",
         css_classes=["toggle"],

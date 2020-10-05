@@ -191,13 +191,16 @@ def process_level_elements():
          DropdownChoice(
              title=_("Enable per-process details in long-output"),
              label=_("Enable per-process details"),
-             help=_("If active, the long output of this service will contain a list of all the "
-                    "matching processes and their details (i.e. PID, CPU usage, memory usage). "
-                    "Please note that HTML output will only work if \"Escape HTML codes in "
-                    "plugin output\" is disabled in global settings. This might expose you to "
-                    "Cross-Site-Scripting (everyone with write-access to checks could get "
-                    "scripts executed on the monitoring site in the context of the user of the "
-                    "monitoring site) so please do this if you understand the consequences."),
+             help=_(
+                 "If active, the long output of this service will contain a list of all the "
+                 "matching processes and their details (i.e. PID, CPU usage, memory usage). "
+                 "Please note that HTML output will only work if rules in the rulesets "
+                 "\"Escape HTML codes in host output\" or \"Escape HTML codes in service output\" "
+                 "are created or the global setting \"Escape HTML codes in plugin output\" "
+                 "is disabled. This might expose you to "
+                 "Cross-Site-Scripting attacks (everyone with write-access to checks could get "
+                 "scripts executed on the monitoring site in the context of the user of the "
+                 "monitoring site) so please do this if you understand the consequences."),
              choices=[
                  (None, _("Disable")),
                  ("text", _("Text output")),
@@ -319,7 +322,6 @@ def process_discovery_descr_option():
 def process_match_options():
     return Alternative(
         title=_("Process Matching"),
-        style="dropdown",
         elements=[
             TextAscii(
                 title=_("Exact name of the process without argments"),
@@ -362,7 +364,6 @@ def user_match_options(extra_elements=None):
 
     return Alternative(
         title=_("Name of operating system user"),
-        style="dropdown",
         elements=[
             TextAscii(title=_("Exact name of the operating system user"), label=_("User:"),
                       size=50),
@@ -400,7 +401,6 @@ def cgroup_match_options():
         title=_("Operating system control group information"),
         elements=[
             Alternative(
-                style="dropdown",
                 elements=[
                     TextAscii(title=_("Exact content of the operating system control group info"),
                               label=_("Control group:"),
@@ -528,7 +528,7 @@ def convert_inventory_processes(old_dict):
 def _valuespec_inventory_processes_rules():
     return Transform(
         Dictionary(
-            title=_('Process Discovery'),
+            title=_('Process discovery'),
             help=_("This ruleset defines criteria for automatically creating checks for running "
                    "processes based upon what is running when the service discovery is "
                    "done. These services will be created with default parameters. They will get "
@@ -614,7 +614,6 @@ def match_hr_alternative(x):
 def hr_process_match_name_option():
     return Alternative(
         title=_("Process Name Matching"),
-        style="dropdown",
         elements=[
             TextAscii(
                 title=_("Exact name of the textual description"),
@@ -649,7 +648,6 @@ def hr_process_match_name_option():
 def hr_process_match_path_option():
     return Alternative(
         title=_("Process Path Matching"),
-        style="dropdown",
         elements=[
             TextAscii(
                 title=_("Exact name of the process path"),
@@ -754,7 +752,7 @@ def hr_process_parameter_elements():
 
 def _valuespec_discovery_hr_processes_rules():
     return Dictionary(
-        title=_('Process Discovery (only SNMP)'),
+        title=_('Process discovery (only SNMP)'),
         help=_("This ruleset defines criteria for automatically creating checks for running "
                "SNMP processes based upon the HOST Resource MIB and what is running when the "
                "service discovery is done. You can either specify the textual description "

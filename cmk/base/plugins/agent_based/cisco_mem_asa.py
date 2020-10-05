@@ -28,17 +28,17 @@ False
 from typing import Sequence, Dict
 from contextlib import suppress
 
-from cmk.base.plugins.agent_based.utils.size_trend import size_trend
-from cmk.base.plugins.agent_based.utils.memory import (
+from .utils.size_trend import size_trend
+from .utils.memory import (
     get_levels_mode_from_value,
     check_element,
 )
-from .agent_based_api.v0 import (
+from .agent_based_api.v1 import (
     SNMPTree,
     register,
     Service,
     Result,
-    state,
+    State as state,
     startswith,
     all_of,
     matches,
@@ -46,11 +46,11 @@ from .agent_based_api.v0 import (
     get_value_store,
     GetRateError,
 )
-from .agent_based_api.v0.type_defs import (
+from .agent_based_api.v1.type_defs import (
     SNMPStringTable,
     Parameters,
-    CheckGenerator,
-    DiscoveryGenerator,
+    CheckResult,
+    DiscoveryResult,
     ValueStore,
 )
 
@@ -131,7 +131,7 @@ register.snmp_section(
 )
 
 
-def discovery_cisco_mem(section: Section) -> DiscoveryGenerator:
+def discovery_cisco_mem(section: Section) -> DiscoveryResult:
     """
     >>> for elem in discovery_cisco_mem({
     ...         'System memory':         ['1251166290', '3043801006'],
@@ -145,7 +145,7 @@ def discovery_cisco_mem(section: Section) -> DiscoveryGenerator:
     yield from (Service(item=item) for item in section if item != "Driver text")
 
 
-def check_cisco_mem(item: str, params: Parameters, section: Section) -> CheckGenerator:
+def check_cisco_mem(item: str, params: Parameters, section: Section) -> CheckResult:
     yield from _idem_check_cisco_mem(get_value_store(), item, params, section)
 
 
@@ -154,7 +154,7 @@ def _idem_check_cisco_mem(
     item: str,
     params: Parameters,
     section: Section,
-) -> CheckGenerator:
+) -> CheckResult:
     """
     >>> vs = {}
     >>> for result in _idem_check_cisco_mem(
@@ -170,10 +170,10 @@ def _idem_check_cisco_mem(
     ...          'MEMPOOL_DMA': ['429262192', '378092176'],
     ...          'MEMPOOL_GLOBAL_SHARED': ['1092814800', '95541296']}):
     ...     print(result)
-    Result(state=<state.OK: 0>, summary='Usage: 53.2% - 409 MiB of 770 MiB', details='Usage: 53.2% - 409 MiB of 770 MiB')
+    Result(state=<State.OK: 0>, summary='Usage: 53.2% - 409 MiB of 770 MiB', details='Usage: 53.2% - 409 MiB of 770 MiB')
     Metric('mem_used_percent', 53.16899356888102, levels=(None, None), boundaries=(0.0, None))
     """
-    if not item in section:
+    if item not in section:
         return
     values = section[item]
     # We've seen SNMP outputs containing empty entries for free or used memory.
@@ -201,7 +201,7 @@ def check_cisco_mem_sub(
     params: Parameters,
     mem_used: int,
     mem_total: int,
-) -> CheckGenerator:
+) -> CheckResult:
     if not mem_total:
         yield Result(state=state.UNKNOWN,
                      summary="Cannot calculate memory usage: Device reports total memory 0")

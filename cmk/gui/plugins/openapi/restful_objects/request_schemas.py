@@ -8,6 +8,7 @@ from marshmallow import ValidationError  # type: ignore[import]
 from marshmallow_oneofschema import OneOfSchema  # type: ignore[import]
 
 from cmk.gui import watolib
+from cmk.utils.defines import weekday_ids
 from cmk.gui.exceptions import MKUserError
 from cmk.gui.plugins.openapi import fields
 from cmk.gui.plugins.openapi.livestatus_helpers.commands.downtimes import (
@@ -24,6 +25,11 @@ from cmk.gui.plugins.openapi.livestatus_helpers.commands.acknowledgments import 
 )
 from cmk.gui.plugins.webapi import validate_host_attributes
 from cmk.gui.plugins.openapi.endpoints.utils import verify_group_exist
+from cmk.gui.watolib.timeperiods import verify_timeperiod_name_exists
+from cmk.gui.watolib.groups import is_alias_used
+from cmk.gui.watolib.passwords import password_exists, contact_group_choices
+
+import cmk.gui.config as config
 
 
 class InputAttribute(BaseSchema):
@@ -576,6 +582,192 @@ class CreateDowntimeBase(BaseSchema):
     comment = fields.String(required=False, example="Security updates")
 
 
+class TimePeriodName(fields.String):
+    """A field representing a time_period name"""
+
+    default_error_messages = {
+        'should_exist': 'Name missing: {name!r}',
+        'should_not_exist': 'Name {name!r} already exists.',
+    }
+
+    def __init__(
+        self,
+        example,
+        required=True,
+        validate=None,
+        should_exist: bool = True,
+        **kwargs,
+    ):
+        self._should_exist = should_exist
+        super().__init__(
+            example=example,
+            required=required,
+            validate=validate,
+            **kwargs,
+        )
+
+    def _validate(self, value):
+        super()._validate(value)
+
+        _exists = verify_timeperiod_name_exists(value)
+        if self._should_exist and not _exists:
+            self.fail("should_exist", name=value)
+        elif not self._should_exist and _exists:
+            self.fail("should_not_exist", name=value)
+
+
+class TimePeriodAlias(fields.String):
+    """A field representing a time_period name"""
+
+    default_error_messages = {
+        'should_exist': 'Alias missing: {name!r}',
+        'should_not_exist': 'Alias {name!r} already exists.',
+    }
+
+    def __init__(
+        self,
+        example,
+        required=True,
+        validate=None,
+        should_exist: bool = True,
+        **kwargs,
+    ):
+        self._should_exist = should_exist
+        super().__init__(
+            example=example,
+            required=required,
+            validate=validate,
+            **kwargs,
+        )
+
+    def _validate(self, value):
+        super()._validate(value)
+
+        # Empty String because validation works for non-timeperiod alias & time period name is
+        # verified separately
+        _new_entry, _ = is_alias_used("timeperiods", "", value)
+        if self._should_exist and _new_entry:
+            self.fail("should_exist", name=value)
+        elif not self._should_exist and not _new_entry:
+            self.fail("should_not_exist", name=value)
+
+
+class TimeRange(BaseSchema):
+    start = fields.Time(
+        required=True,
+        example="14:00",
+        description="The start time of the period's time range",
+    )
+    end = fields.Time(
+        required=True,
+        example="16:00",
+        description="The end time of the period's time range",
+    )
+
+
+class TimeRangeActive(BaseSchema):
+    day = fields.String(description="The day for which time ranges are to be specified. The 'all' "
+                        "option allows to specify time ranges for all days.",
+                        pattern=f"all|{'|'.join(weekday_ids())}")
+    time_ranges = fields.List(fields.Nested(TimeRange))
+
+
+class TimePeriodException(BaseSchema):
+    date = fields.Date(
+        required=True,
+        example="2020-01-01",
+        description="The date of the time period exception."
+        "8601 profile",
+    )
+    time_ranges = fields.List(
+        fields.Nested(TimeRange),
+        required=False,
+        example=[{
+            'start': '14:00',
+            'end': '18:00'
+        }],
+    )
+
+
+class InputTimePeriod(BaseSchema):
+    name = TimePeriodName(
+        example="first",
+        description="A unique name for the time period.",
+        required=True,
+        should_exist=False,
+    )
+    alias = TimePeriodAlias(
+        example="alias",
+        description="An alias for the time period.",
+        required=True,
+        should_exist=False,
+    )
+    active_time_ranges = fields.List(
+        fields.Nested(TimeRangeActive),
+        example=[{
+            'day': 'monday',
+            'time_ranges': [{
+                'start': '12:00',
+                'end': '14:00'
+            }]
+        }],
+        description="The list of active time ranges.",
+        required=True,
+    )
+    exceptions = fields.List(
+        fields.Nested(TimePeriodException),
+        required=False,
+        example=[{
+            'date': '2020-01-01',
+            'time_ranges': [{
+                'start': '14:00',
+                'end': '18:00'
+            }]
+        }],
+    )
+
+    exclude = fields.List(
+        TimePeriodAlias(
+            example="alias",
+            description="The alias for a time period.",
+            required=True,
+            should_exist=True,
+        ),
+        example="['alias']",
+        description="The collection of time period aliases whose periods are excluded",
+        required=False,
+    )
+
+
+class UpdateTimePeriod(BaseSchema):
+    alias = TimePeriodAlias(
+        example="alias",
+        description="An alias for the time period",
+        required=False,
+        should_exist=False,
+    )
+    active_time_ranges = fields.List(
+        fields.Nested(TimeRangeActive),
+        example={
+            'start': '12:00',
+            'end': '14:00'
+        },
+        description="The list of active time ranges which replaces the existing list of time ranges",
+        required=False,
+    )
+    exceptions = fields.List(
+        fields.Nested(TimePeriodException),
+        required=False,
+        example=[{
+            'date': '2020-01-01',
+            'time_ranges': [{
+                'start': '14:00',
+                'end': '18:00'
+            }]
+        }],
+    )
+
+
 SERVICE_DESCRIPTION_FIELD = fields.String(required=False, example="CPU utilization")
 
 HOST_DURATION = fields.Integer(
@@ -651,6 +843,202 @@ class CreateDowntime(OneOfSchema):
         'service': CreateServiceDowntime,
         'servicegroup': CreateServiceGroupDowntime,
     }
+
+
+class PasswordIdent(fields.String):
+    """A field representing a password identifier"""
+
+    default_error_messages = {
+        'should_exist': 'Identifier missing: {name!r}',
+        'should_not_exist': 'Identifier {name!r} already exists.',
+    }
+
+    def __init__(
+        self,
+        example,
+        required=True,
+        validate=None,
+        should_exist: bool = True,
+        **kwargs,
+    ):
+        self._should_exist = should_exist
+        super().__init__(
+            example=example,
+            required=required,
+            validate=validate,
+            **kwargs,
+        )
+
+    def _validate(self, value):
+        super()._validate(value)
+
+        exists = password_exists(value)
+        if self._should_exist and not exists:
+            self.fail("should_exist", name=value)
+        elif not self._should_exist and exists:
+            self.fail("should_not_exist", name=value)
+
+
+class PasswordOwner(fields.String):
+    """A field representing a password owner group"""
+
+    default_error_messages = {
+        'invalid': 'Specified owner value is not valid: {name!r}',
+    }
+
+    def __init__(
+        self,
+        example,
+        required=True,
+        validate=None,
+        **kwargs,
+    ):
+        super().__init__(
+            example=example,
+            required=required,
+            validate=validate,
+            **kwargs,
+        )
+
+    def _validate(self, value):
+        """Verify if the specified owner is valid for the logged-in user
+
+        Non-admin users cannot specify admin as the owner
+
+        """
+        super()._validate(value)
+        permitted_owners = [group[0] for group in contact_group_choices(only_own=True)]
+        if config.user.may("wato.edit_all_passwords"):
+            permitted_owners.append("admin")
+
+        if value not in permitted_owners:
+            self.fail("invalid", name=value)
+
+
+class PasswordShare(fields.String):
+    """A field representing a password share group"""
+
+    default_error_messages = {
+        'invalid': 'The password cannot be shared with specified group: {name!r}',
+    }
+
+    def __init__(
+        self,
+        example,
+        required=True,
+        validate=None,
+        **kwargs,
+    ):
+        super().__init__(
+            example=example,
+            required=required,
+            validate=validate,
+            **kwargs,
+        )
+
+    def _validate(self, value):
+        super()._validate(value)
+        shareable_groups = [group[0] for group in contact_group_choices()]
+        if value not in ["all", *shareable_groups]:
+            self.fail("invalid", name=value)
+
+
+class InputPassword(BaseSchema):
+    ident = PasswordIdent(
+        example="pass",
+        description="An unique identifier for the password",
+        should_exist=False,
+    )
+    title = fields.String(
+        required=True,
+        example="Kubernetes login",
+        description="A title for the password",
+    )
+    comment = fields.String(required=False,
+                            example="Kommentar",
+                            description="A comment for the password",
+                            missing="")
+
+    documentation_url = fields.String(
+        required=False,
+        attribute="docu_url",
+        example="localhost",
+        description=
+        "An optional URL pointing to documentation or any other page. You can use either global URLs (beginning with http://), absolute local urls (beginning with /) or relative URLs (that are relative to check_mk/).",
+        missing="",
+    )
+
+    password = fields.String(
+        required=True,
+        example="password",
+        description="The password string",
+    )
+
+    owner = PasswordOwner(
+        example="admin",
+        description=
+        "Each password is owned by a group of users which are able to edit, delete and use existing passwords.",
+        required=True,
+        attribute="owned_by",
+    )
+
+    shared = fields.List(
+        PasswordShare(
+            example="all",
+            description=
+            "By default only the members of the owner contact group are permitted to use a a configured password. It is possible to share a password with other groups of users to make them able to use a password in checks.",
+        ),
+        example=["all"],
+        description="The list of members to share the password with",
+        required=False,
+        attribute="shared_with",
+        missing=[],
+    )
+
+
+class UpdatePassword(BaseSchema):
+    title = fields.String(
+        required=False,
+        example="Kubernetes login",
+        description="A title for the password",
+    )
+
+    comment = fields.String(
+        required=False,
+        example="Kommentar",
+        description="A comment for the password",
+    )
+
+    documentation_url = fields.String(
+        required=False,
+        attribute="docu_url",
+        example="localhost",
+        description=
+        "An optional URL pointing to documentation or any other page. You can use either global URLs (beginning with http://), absolute local urls (beginning with /) or relative URLs (that are relative to check_mk/).",
+    )
+
+    password = fields.String(
+        required=False,
+        example="password",
+        description="The password string",
+    )
+
+    owner = PasswordOwner(
+        example="admin",
+        description=
+        "Each password is owned by a group of users which are able to edit, delete and use existing passwords.",
+        required=False,
+        attribute="owned_by")
+
+    shared = fields.List(PasswordShare(
+        example="all",
+        description=
+        "By default only the members of the owner contact group are permitted to use a a configured password. It is possible to share a password with other groups of users to make them able to use a password in checks.",
+    ),
+                         example=["all"],
+                         description="The list of members to share the password with",
+                         required=False,
+                         attribute="shared_with")
 
 
 class AcknowledgeHostProblem(BaseSchema):

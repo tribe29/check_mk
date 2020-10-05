@@ -18,20 +18,8 @@ from cmk.snmplib.type_defs import SNMPDetectSpec
 
 import cmk.base.check_api_utils as check_api_utils
 import cmk.base.prediction
-from cmk.base.api.agent_based.checking_classes import IgnoreResultsError, Metric, Result, state
+from cmk.base.api.agent_based.checking_classes import IgnoreResultsError, Metric, Result, State
 from cmk.base.api.agent_based.type_defs import ValueStore
-
-
-# annotating this breaks validation.
-# yet another reason to not use this.
-def parse_to_string_table(string_table):
-    """A function that returns its argument unchanged.
-
-    Provided for developers who don't want to implement a parse function
-    in their section definition (which they should).
-    """
-    return string_table
-
 
 #     ____       _            _
 #    |  _ \  ___| |_ ___  ___| |_   ___ _ __   ___  ___
@@ -236,22 +224,22 @@ def _do_check_levels(
     levels_upper: Optional[Tuple[float, float]],
     levels_lower: Optional[Tuple[float, float]],
     render_func: Callable[[float], str],
-) -> Tuple[state, str]:
+) -> Tuple[State, str]:
     # Typing says that levels are either None, or a Tuple of float.
     # However we also deal with (None, None) to avoid crashes of custom plugins.
     # CRIT ?
     if levels_upper and levels_upper[1] is not None and value >= levels_upper[1]:
-        return state.CRIT, _levelsinfo_ty("at", levels_upper, render_func)
+        return State.CRIT, _levelsinfo_ty("at", levels_upper, render_func)
     if levels_lower and levels_lower[1] is not None and value < levels_lower[1]:
-        return state.CRIT, _levelsinfo_ty("below", levels_lower, render_func)
+        return State.CRIT, _levelsinfo_ty("below", levels_lower, render_func)
 
     # WARN ?
     if levels_upper and levels_upper[0] is not None and value >= levels_upper[0]:
-        return state.WARN, _levelsinfo_ty("at", levels_upper, render_func)
+        return State.WARN, _levelsinfo_ty("at", levels_upper, render_func)
     if levels_lower and levels_lower[0] is not None and value < levels_lower[0]:
-        return state.WARN, _levelsinfo_ty("below", levels_lower, render_func)
+        return State.WARN, _levelsinfo_ty("below", levels_lower, render_func)
 
-    return state.OK, ""
+    return State.OK, ""
 
 
 def _levelsinfo_ty(preposition: str, levels: Tuple[float, float],
@@ -322,7 +310,7 @@ def check_levels(
         ...     23.0,
         ...     levels_upper=(12., 42.),
         ...     label="Fridge",
-        ...      render_func=lambda v: "%.1f°",
+        ...     render_func=lambda v: "%.1f°",
         ... )
         >>> print(result.summary)
         'Fridge: 23.0° (warn/crit at 12.0°/42.0°)'
@@ -397,7 +385,7 @@ def check_levels_predictive(
     except Exception as e:
         if cmk.utils.debug.enabled():
             raise
-        yield Result(state=state.UNKNOWN, summary="%s" % e)
+        yield Result(state=State.UNKNOWN, summary="%s" % e)
         return
 
     levels_upper = (None if levels_tuple[0] is None or levels_tuple[1] is None else

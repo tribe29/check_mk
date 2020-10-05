@@ -8,7 +8,7 @@
 This library is currently handled as internal module of Check_MK and
 does not offer stable APIs. The code may change at any time."""
 
-__version__ = "1.7.0i1"
+__version__ = "2.0.0i1"
 
 import errno
 import os
@@ -63,6 +63,10 @@ def is_managed_edition() -> bool:
 def is_demo() -> bool:
     parts = omd_version().split(".")
     return parts[-1] == "demo"
+
+
+def is_cma() -> bool:
+    return os.path.exists("/etc/cma/cma.conf")
 
 
 #   .--general infos-------------------------------------------------------.

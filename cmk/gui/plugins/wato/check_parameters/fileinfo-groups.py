@@ -26,6 +26,9 @@ from cmk.gui.plugins.wato import (
     HostRulespec,
 )
 
+from cmk.gui.plugins.wato.check_parameters.file_attributes_utils import (
+    additional_rules,)
+
 
 def _valuespec_fileinfo_groups():
     return ListOf(
@@ -234,6 +237,10 @@ def _parameter_valuespec_fileinfo_groups():
                    "and any number of upper or lower levels. If all of the configured levels within "
                    "a conjunction are reached then the related state is reported."),
              )),
+            (additional_rules(maxage_name='maxage',
+                              minage_name='minage',
+                              maxsize_name='maxsize',
+                              minsize_name='minsize')),
         ],
         ignored_keys=["precompiled_patterns", "group_patterns"],
     )

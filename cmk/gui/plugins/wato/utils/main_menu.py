@@ -30,7 +30,7 @@ class MainMenu:
                 continue
 
             html.open_a(href=item.get_url(), onfocus="if (this.blur) this.blur();")
-            html.icon(item.title, item.icon)
+            html.icon(item.icon, item.title)
             html.div(item.title, class_="title")
             html.div(item.description, class_="subtitle")
             html.close_a()
@@ -144,6 +144,10 @@ class MainModule(MenuItem, metaclass=abc.ABCMeta):
     def icon(self) -> str:
         raise NotImplementedError()
 
+    @property
+    def emblem(self) -> Optional[str]:
+        return None
+
     @abc.abstractproperty
     def permission(self) -> Optional[str]:
         raise NotImplementedError()
@@ -230,12 +234,20 @@ MainModuleTopicServices = main_module_topic_registry.register(
         sort_index=20,
     ))
 
+MainModuleTopicBI = main_module_topic_registry.register(
+    MainModuleTopic(
+        name="bi",
+        title=_l("Business Intelligence"),
+        icon_name="topic_bi",
+        sort_index=30,
+    ))
+
 MainModuleTopicAgents = main_module_topic_registry.register(
     MainModuleTopic(
         name="agents",
         title=_l("Agents"),
         icon_name="topic_agents",
-        sort_index=30,
+        sort_index=40,
     ))
 
 MainModuleTopicEvents = main_module_topic_registry.register(
@@ -243,7 +255,7 @@ MainModuleTopicEvents = main_module_topic_registry.register(
         name="events",
         title=_l("Events"),
         icon_name="topic_events",
-        sort_index=40,
+        sort_index=50,
     ))
 
 MainModuleTopicUsers = main_module_topic_registry.register(
@@ -251,7 +263,7 @@ MainModuleTopicUsers = main_module_topic_registry.register(
         name="users",
         title=_l("Users"),
         icon_name="topic_users",
-        sort_index=50,
+        sort_index=60,
     ))
 
 MainModuleTopicGeneral = main_module_topic_registry.register(
@@ -259,7 +271,7 @@ MainModuleTopicGeneral = main_module_topic_registry.register(
         name="general",
         title=_l("General"),
         icon_name="topic_general",
-        sort_index=60,
+        sort_index=70,
     ))
 
 MainModuleTopicMaintenance = main_module_topic_registry.register(
@@ -267,7 +279,7 @@ MainModuleTopicMaintenance = main_module_topic_registry.register(
         name="maintenance",
         title=_l("Maintenance"),
         icon_name="topic_maintenance",
-        sort_index=70,
+        sort_index=80,
     ))
 
 MainModuleTopicCustom = main_module_topic_registry.register(

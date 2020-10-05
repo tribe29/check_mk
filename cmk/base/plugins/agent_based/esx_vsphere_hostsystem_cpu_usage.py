@@ -5,19 +5,19 @@
 # conditions defined in the file COPYING, which is part of this source code package.
 from typing import Any, Dict, List, Optional
 
-from .agent_based_api.v0.type_defs import (
-    CheckGenerator,
-    DiscoveryGenerator,
+from .agent_based_api.v1.type_defs import (
+    CheckResult,
+    DiscoveryResult,
     Parameters,
 )
-from .agent_based_api.v0 import get_value_store, register, Result, Service, state
+from .agent_based_api.v1 import get_value_store, register, Result, Service, State as state
 from .utils import cpu_util
 
 
 def discover_esx_vsphere_hostsystem_cpu_usage(
     section_esx_vsphere_hostsystem: Dict[str, List[str]],
     section_winperf_processor: Any,
-) -> DiscoveryGenerator:
+) -> DiscoveryResult:
     if section_winperf_processor:
         return
 
@@ -34,7 +34,7 @@ def check_esx_vsphere_hostsystem_cpu(
     params: Parameters,
     section_esx_vsphere_hostsystem: Optional[Dict[str, List[str]]],
     section_winperf_processor: Any,
-) -> CheckGenerator:
+) -> CheckResult:
     if not section_esx_vsphere_hostsystem:
         return
     try:

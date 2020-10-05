@@ -22,6 +22,7 @@ from typing import (
     Iterable,
     List,
     Optional,
+    Sequence,
     Set,
     Tuple,
     Union,
@@ -41,8 +42,7 @@ from cmk.utils.type_defs import (
     CheckPluginName,
     HostAddress,
     HostName,
-    InventoryPluginName,
-    Metric,
+    MetricTuple,
     SectionName,
     ServiceAdditionalDetails,
     ServiceCheckResult,
@@ -52,6 +52,8 @@ from cmk.utils.type_defs import (
     SourceType,
 )
 
+from cmk.fetchers.controller import FetcherMessage
+
 import cmk.base.api.agent_based.register as agent_based_register
 import cmk.base.check_api_utils as check_api_utils
 import cmk.base.check_table as check_table
@@ -59,18 +61,19 @@ import cmk.base.config as config
 import cmk.base.core
 import cmk.base.cpu_tracking as cpu_tracking
 import cmk.base.crash_reporting
-import cmk.base.data_sources as data_sources
+import cmk.base.checkers as checkers
 import cmk.base.decorator
 import cmk.base.inventory as inventory
 import cmk.base.ip_lookup as ip_lookup
 import cmk.base.item_state as item_state
+import cmk.base.license_usage as license_usage
 import cmk.base.utils
 from cmk.base.api.agent_based import checking_classes, value_store
 from cmk.base.api.agent_based.register.check_plugins_legacy import wrap_parameters
-from cmk.base.api.agent_based.type_defs import CheckGenerator, CheckPlugin, Parameters
+from cmk.base.api.agent_based.type_defs import Parameters
 from cmk.base.check_api_utils import MGMT_ONLY as LEGACY_MGMT_ONLY
 from cmk.base.check_utils import LegacyCheckParameters, Service, ServiceID
-from cmk.base.data_sources.host_sections import HostKey, MultiHostSections
+from cmk.base.checkers.host_sections import HostKey, MultiHostSections
 
 if not cmk_version.is_raw_edition():
     import cmk.base.cee.keepalive as keepalive  # type: ignore[import] # pylint: disable=no-name-in-module
@@ -89,8 +92,7 @@ _checkresult_file_path = None
 _submit_to_core = True
 _show_perfdata = False
 
-ServiceCheckResultWithOptionalDetails = Tuple[ServiceState, ServiceDetails, List[Metric]]
-UncleanPerfValue = Union[None, str, float]
+ServiceCheckResultWithOptionalDetails = Tuple[ServiceState, ServiceDetails, List[MetricTuple]]
 
 #.
 #   .--Checking------------------------------------------------------------.
@@ -115,10 +117,11 @@ CHECK_NOT_IMPLEMENTED: ServiceCheckResult = (3, 'Check plugin not implemented', 
 def do_check(
     hostname: HostName,
     ipaddress: Optional[HostAddress],
-    only_check_plugin_names: Optional[Set[CheckPluginName]] = None
+    only_check_plugin_names: Optional[Set[CheckPluginName]] = None,
+    fetcher_messages: Optional[Sequence[FetcherMessage]] = None
 ) -> Tuple[int, List[ServiceDetails], List[ServiceAdditionalDetails], List[str]]:
     cpu_tracking.start("busy")
-    console.verbose("Check_MK version %s\n", cmk_version.__version__)
+    console.verbose("Checkmk version %s\n", cmk_version.__version__)
 
     config_cache = config.get_config_cache()
     host_config = config_cache.get_host_config(hostname)
@@ -130,6 +133,8 @@ def do_check(
     long_infotexts: List[ServiceAdditionalDetails] = []
     perfdata: List[str] = []
     try:
+        license_usage.try_history_update()
+
         # In case of keepalive we always have an ipaddress (can be 0.0.0.0 or :: when
         # address is unknown). When called as non keepalive ipaddress may be None or
         # is already an address (2nd argument)
@@ -138,36 +143,65 @@ def do_check(
 
         item_state.load(hostname)
 
-        services = _get_filtered_services(
+        # When monitoring Checkmk clusters, the cluster nodes are responsible for fetching all
+        # information from the monitored host and cache the result for the cluster checks to be
+        # performed on the cached information.
+        #
+        # This means that in case of SNMP nodes, they need to take the clustered services of the
+        # node into account, fetch the needed sections and cache them for the cluster host.
+        #
+        # But later, when checking the node services, the node has to only deal with the unclustered
+        # services.
+        belongs_to_cluster = len(config_cache.clusters_of(hostname)) > 0
+
+        services_to_fetch = _get_services_to_fetch(
             host_name=hostname,
-            belongs_to_cluster=len(config_cache.clusters_of(hostname)) > 0,
+            belongs_to_cluster=belongs_to_cluster,
             config_cache=config_cache,
             only_check_plugins=only_check_plugin_names,
         )
 
-        # see which raw sections we may need
-        selected_raw_sections = _get_relevant_raw_sections(services, host_config)
-
-        sources = data_sources.make_sources(
-            host_config,
-            ipaddress,
-            mode=data_sources.Mode.CHECKING,
+        services_to_check = _filter_clustered_services(
+            config_cache=config_cache,
+            host_name=hostname,
+            belongs_to_cluster=belongs_to_cluster,
+            services=services_to_fetch,
         )
-        mhs = data_sources.make_host_sections(
-            config_cache,
+
+        # see which raw sections we may need
+        selected_raw_sections = agent_based_register.get_relevant_raw_sections(
+            check_plugin_names=(s.check_plugin_name for s in services_to_fetch),
+            consider_inventory_plugins=host_config.do_status_data_inventory,
+        )
+
+        sources = checkers.make_sources(
             host_config,
             ipaddress,
-            data_sources.Mode.CHECKING,
-            sources=sources,
+            mode=checkers.Mode.CHECKING,
+        )
+        mhs = MultiHostSections()
+
+        result = checkers.update_host_sections(
+            mhs,
+            checkers.make_nodes(
+                config_cache,
+                host_config,
+                ipaddress,
+                checkers.Mode.CHECKING,
+                sources,
+            ),
             selected_raw_sections=selected_raw_sections,
             max_cachefile_age=host_config.max_cachefile_age,
+            host_config=host_config,
+            fetcher_messages=fetcher_messages,
         )
+
         num_success, plugins_missing_data = _do_all_checks_on_host(
             config_cache,
             host_config,
             ipaddress,
             multi_host_sections=mhs,
-            services=services,
+            services=services_to_check,
             only_check_plugins=only_check_plugin_names,
         )
         inventory.do_inventory_actions_during_checking_for(
@@ -181,8 +215,8 @@ def do_check(
         if _submit_to_core:
             item_state.save(hostname)
 
-        for source in sources:
-            source_state, source_output, source_perfdata = source.get_summary_result()
+        for source, host_sections in result:
+            source_state, source_output, source_perfdata = source.summarize(host_sections)
             if source_output != "":
                 status = max(status, source_state)
                 infotexts.append("[%s] %s" % (source.id, source_output))
@@ -234,38 +268,16 @@ def do_check(
             inline.snmp_stats_save()
 
 
-def _get_relevant_raw_sections(services: List[Service], host_config: config.HostConfig):
-    # see if we can remove this function, once inventory plugins have been migrated to
-    # the new API. In particular, we schould be able to get rid of the imports.
-
-    if host_config.do_status_data_inventory:
-        # This is called during checking, but the inventory plugins are not loaded yet
-        import cmk.base.inventory_plugins as inventory_plugins  # pylint: disable=import-outside-toplevel
-        from cmk.base.check_api import get_check_api_context  # pylint: disable=import-outside-toplevel
-        inventory_plugins.load_plugins(get_check_api_context, inventory.get_inventory_context)
-        inventory_plugin_names: Iterable[InventoryPluginName] = (
-            InventoryPluginName(name.split('.')[0]) for name in inventory_plugins.inv_info)
-    else:
-        inventory_plugin_names = ()
-
-    return agent_based_register.get_relevant_raw_sections(
-        check_plugin_names=(s.check_plugin_name for s in services),
-        inventory_plugin_names=inventory_plugin_names,
-    )
-
-
 def _check_plugins_missing_data(
     plugins_missing_data: List[CheckPluginName],
     exit_spec: config.ExitSpec,
     some_success: bool,
 ) -> Tuple[ServiceState, ServiceDetails]:
     if not some_success:
-        return (cast(int, exit_spec.get("empty_output", 2)), "Got no information from host")
+        return exit_spec.get("empty_output", 2), "Got no information from host"
 
-    specific_plugins_missing_data_spec = cast(
-        List[config.ExitSpecSection],
-        exit_spec.get("specific_missing_sections", []),
-    )
+    # key is a legacy name, kept for compatibility.
+    specific_plugins_missing_data_spec = exit_spec.get("specific_missing_sections", [])
 
     specific_plugins, generic_plugins = set(), set()
     for check_plugin_name in plugins_missing_data:
@@ -277,7 +289,8 @@ def _check_plugins_missing_data(
         else:  # no break
             generic_plugins.add(str(check_plugin_name))
 
-    generic_plugins_status = cast(int, exit_spec.get("missing_sections", 1))
+    # key is a legacy name, kept for compatibility.
+    generic_plugins_status = exit_spec.get("missing_sections", 1)
     infotexts = [
         "Missing monitoring data for check plugins: %s%s" % (
             ", ".join(sorted(generic_plugins)),
@@ -318,28 +331,37 @@ def _do_all_checks_on_host(
     return num_success, sorted(plugins_missing_data)
 
 
-def _get_filtered_services(
+def _get_services_to_fetch(
     host_name: HostName,
     belongs_to_cluster: bool,
     config_cache: config.ConfigCache,
     only_check_plugins: Optional[Set[CheckPluginName]] = None,
 ) -> List[Service]:
+    """Gather list of services to fetch the sections for
 
-    services = check_table.get_sorted_service_list(
-        host_name,
-        remove_duplicates=True,
-        filter_mode="include_clustered" if belongs_to_cluster else None,
-    )
+    Please note that explicitly includes the services that are assigned to cluster nodes.  In SNMP
+    clusters the nodes have to fetch the information for the checking phase of the clustered
+    services.
+    """
+    services = check_table.get_sorted_service_list(host_name, filter_mode="include_clustered")
 
-    # When check types are specified via command line, enforce them. Otherwise use the
-    # list of checks defined by the check table.
-    if only_check_plugins is None:
-        only_check_plugins = {service.check_plugin_name for service in services}
+    # When check types are specified via command line, enforce them. Otherwise accept all check
+    # plugin names.
+    return [
+        service for service in services
+        if (only_check_plugins is None or service.check_plugin_name in only_check_plugins) and
+        not service_outside_check_period(config_cache, host_name, service.description)
+    ]
 
+
+def _filter_clustered_services(config_cache: config.ConfigCache, host_name: HostName,
+                               belongs_to_cluster: bool, services: List[Service]) -> List[Service]:
+    """If the host belongs to a cluster, exclude the services that are not assigned to this host"""
     def _is_not_of_host(service):
         return host_name != config_cache.host_of_clustered_service(host_name, service.description)
 
     # Filter out check types which are not used on the node
+    only_check_plugins = {service.check_plugin_name for service in services}
     if belongs_to_cluster:
         removed_plugins = {
             plugin for plugin in only_check_plugins if all(
@@ -349,10 +371,8 @@ def _get_filtered_services(
         only_check_plugins -= removed_plugins
 
     return [
-        service for service in services
-        if (service.check_plugin_name in only_check_plugins and
-            not (belongs_to_cluster and _is_not_of_host(service)) and
-            not service_outside_check_period(config_cache, host_name, service.description))
+        service for service in services if (service.check_plugin_name in only_check_plugins and
+                                            not (belongs_to_cluster and _is_not_of_host(service)))
     ]
 
 
@@ -420,7 +440,7 @@ def get_aggregated_result(
     host_config: config.HostConfig,
     ipaddress: Optional[HostAddress],
     service: Service,
-    plugin: Optional[CheckPlugin],
+    plugin: Optional[checking_classes.CheckPlugin],
     params_function: Callable[[], Parameters],
 ) -> Tuple[bool, bool, ServiceCheckResult]:
     """Run the check function and aggregate the subresults
@@ -442,12 +462,18 @@ def get_aggregated_result(
     source_type = (SourceType.MANAGEMENT
                    if service.check_plugin_name.is_management_name() else SourceType.HOST)
 
+    config_cache = config.get_config_cache()
+
     kwargs = {}
     try:
         kwargs = multi_host_sections.get_section_cluster_kwargs(
-            HostKey(host_config.hostname, None, source_type),
+            config_cache.get_clustered_service_node_keys(
+                host_config.hostname,
+                source_type,
+                service.description,
+                ip_lookup.lookup_ip_address,
+            ) or [],
             plugin.sections,
-            service.description,
         ) if host_config.is_cluster else multi_host_sections.get_section_kwargs(
             HostKey(host_config.hostname, ipaddress, source_type),
             plugin.sections,
@@ -458,9 +484,13 @@ def get_aggregated_result(
             # the regular host plugins name. In this case retry with the source type
             # forced to MANAGEMENT:
             kwargs = multi_host_sections.get_section_cluster_kwargs(
-                HostKey(host_config.hostname, None, SourceType.MANAGEMENT),
+                config_cache.get_clustered_service_node_keys(
+                    host_config.hostname,
+                    SourceType.MANAGEMENT,
+                    service.description,
+                    ip_lookup.lookup_ip_address,
+                ) or [],
                 plugin.sections,
-                service.description,
             ) if host_config.is_cluster else multi_host_sections.get_section_kwargs(
                 HostKey(host_config.hostname, ipaddress, SourceType.MANAGEMENT),
                 plugin.sections,
@@ -471,7 +501,8 @@ def get_aggregated_result(
 
         if service.item is not None:
             kwargs["item"] = service.item
-        if plugin.check_ruleset_name:
+
+        if plugin.check_default_parameters is not None:
             kwargs["params"] = params_function()
 
         with value_store.context(plugin.name, service.item):
@@ -522,17 +553,20 @@ def _execute_check_legacy_mode(multi_host_sections: MultiHostSections, hostname:
 
     section_content = None
     mgmt_board_info = config.get_management_board_precedence(section_name, config.check_info)
+    source_type = SourceType.MANAGEMENT if mgmt_board_info == LEGACY_MGMT_ONLY else SourceType.HOST
     try:
         section_content = multi_host_sections.get_section_content(
-            HostKey(
-                hostname,
-                ipaddress,
-                SourceType.MANAGEMENT if mgmt_board_info == LEGACY_MGMT_ONLY else SourceType.HOST,
-            ),
+            HostKey(hostname, ipaddress, source_type),
             mgmt_board_info,
             section_name,
             for_discovery=False,
-            service_description=service.description,
+            cluster_node_keys=config.get_config_cache().get_clustered_service_node_keys(
+                hostname,
+                source_type,
+                service.description,
+                ip_lookup.lookup_ip_address,
+            ),
+            check_legacy_info=config.check_info,
         )
 
         # TODO: Move this to a helper function
@@ -597,7 +631,7 @@ def _legacy_determine_cache_info(multi_host_sections: MultiHostSections,
                                  section_name: SectionName) -> Optional[Tuple[int, int]]:
     """Aggregate information about the age of the data in the agent sections
 
-    This is in data_sources.g_agent_cache_info. For clusters we use the oldest
+    This is in checkers.g_agent_cache_info. For clusters we use the oldest
     of the timestamps, of course.
     """
     cached_ats: List[int] = []
@@ -685,7 +719,6 @@ def _evaluate_timespecific_entry(entry: Dict[str, Any]) -> Dict[str, Any]:
 def is_manual_check(hostname: HostName, service_id: ServiceID) -> bool:
     return service_id in check_table.get_check_table(
         hostname,
-        remove_duplicates=True,
         skip_autochecks=True,
     )
 
@@ -697,16 +730,16 @@ def _add_state_marker(
     return result_str if state_marker in result_str else result_str + state_marker
 
 
-def _aggregate_results(subresults: CheckGenerator) -> ServiceCheckResult:
+def _aggregate_results(subresults: checking_classes.CheckResult) -> ServiceCheckResult:
 
     perfdata, results = _consume_and_dispatch_result_types(subresults)
     needs_marker = len(results) > 1
 
     summaries: List[str] = []
     details: List[str] = []
-    status = checking_classes.state(0)
+    status = checking_classes.State.OK
     for result in results:
-        status = checking_classes.state.worst(status, result.state)
+        status = checking_classes.State.worst(status, result.state)
         state_marker = check_api_utils.state_markers[int(result.state)] if needs_marker else ""
 
         if result.summary:
@@ -734,13 +767,14 @@ def _aggregate_results(subresults: CheckGenerator) -> ServiceCheckResult:
 
 
 def _consume_and_dispatch_result_types(
-    subresults: CheckGenerator,) -> Tuple[List[Metric], List[checking_classes.Result]]:
+    subresults: checking_classes.CheckResult,
+) -> Tuple[List[MetricTuple], List[checking_classes.Result]]:
     """Consume *all* check results, and *then* raise, if we encountered
     an IgnoreResults instance.
     """
     ignore_results: List[checking_classes.IgnoreResults] = []
     results: List[checking_classes.Result] = []
-    perfdata: List[Metric] = []
+    perfdata: List[MetricTuple] = []
 
     for subr in subresults:
         if isinstance(subr, checking_classes.IgnoreResults):
@@ -748,7 +782,6 @@ def _consume_and_dispatch_result_types(
         elif isinstance(subr, checking_classes.Metric):
             perfdata.append((subr.name, subr.value) + subr.levels + subr.boundaries)
         else:
-            assert isinstance(subr, checking_classes.Result)
             results.append(subr)
 
     if ignore_results:
@@ -780,7 +813,7 @@ def _sanitize_yield_check_result(result: Iterable[Any]) -> ServiceCheckResult:
     # Several sub results issued with multiple yields. Make that worst sub check
     # decide the total state, join the texts and performance data. Subresults with
     # an infotext of None are used for adding performance data.
-    perfdata: List[Metric] = []
+    perfdata: List[MetricTuple] = []
     infotexts: List[ServiceDetails] = []
     status: ServiceState = 0
 
@@ -811,6 +844,9 @@ def _sanitize_tuple_check_result(
 
     infotext = _sanitize_check_result_infotext(infotext, allow_missing_infotext)
 
+    # NOTE: the typing is just wishful thinking. However, this part of the
+    # code is only used for the legacy cluster case, so we do not introduce
+    # new validation here.
     return state, infotext, perfdata
 
 
@@ -834,21 +870,17 @@ def _sanitize_check_result_infotext(infotext: Optional[AnyStr],
     return infotext
 
 
-def _convert_perf_data(p: List[UncleanPerfValue]) -> str:
+def _convert_perf_data(p: Sequence[Union[None, str, float]]) -> str:
     # replace None with "" and fill up to 6 values
-    normalized = (list(map(_convert_perf_value, p)) + ['', '', '', ''])[0:6]
-    return "%s=%s;%s;%s;%s;%s" % tuple(normalized)
+    normalized = [_convert_perf_value(v) for v in p]
+    normalized.extend('      ')
+    return "%s=%s;%s;%s;%s;%s" % tuple(normalized[:6])
 
 
-def _convert_perf_value(x: UncleanPerfValue) -> str:
-    if x is None:
-        return ""
-    if isinstance(x, str):
-        return x
+def _convert_perf_value(x: Union[None, str, float]) -> str:
     if isinstance(x, float):
         return ("%.6f" % x).rstrip("0").rstrip(".")
-
-    return str(x)
+    return str(x or "")
 
 
 #.
@@ -866,8 +898,24 @@ def _convert_perf_value(x: UncleanPerfValue) -> str:
 # TODO: Put the core specific things to dedicated files
 
 
-def _submit_check_result(host: HostName, servicedesc: ServiceDetails, result: ServiceCheckResult,
-                         cache_info: Optional[Tuple[int, int]]) -> None:
+def _extract_check_command(infotext: str) -> Optional[str]:
+    """
+    Check may append the name of the check command to the
+    details of service output.
+    It might be needed by the graphing tool in order to choose the correct
+    template or apply the correct metric name translations.
+    Currently this is used only by mrpe.
+    """
+    marker = "Check command used in metric system: "
+    return infotext.split(marker, 1)[1].split('\n')[0] if marker in infotext else None
+
+
+def _submit_check_result(
+    host: HostName,
+    servicedesc: ServiceDetails,
+    result: ServiceCheckResult,
+    cache_info: Optional[Tuple[int, int]],
+) -> None:
     state, infotext, perfdata = result
 
     if not (infotext.startswith("OK -") or infotext.startswith("WARN -") or
@@ -883,28 +931,14 @@ def _submit_check_result(host: HostName, servicedesc: ServiceDetails, result: Se
         # ...crash dumps, and hard-coded outputs are regular strings
         infotext = infotext.replace("|", u"\u2758".encode("utf8"))
 
-    # performance data - if any - is stored in the third part of the result
-    perftexts = []
-    perftext = ""
-
-    if perfdata:
-        # Check may append the name of the check command to the
-        # list of perfdata. It is of type string. And it might be
-        # needed by the graphing tool in order to choose the correct
-        # template. Currently this is used only by mrpe.
-        if len(perfdata) > 0 and isinstance(perfdata[-1], str):
-            check_command = perfdata[-1]
-            del perfdata[-1]
-        else:
-            check_command = None
-
-        for p in perfdata:
-            perftexts.append(_convert_perf_data(p))
-
-        if perftexts != []:
-            if check_command and config.perfdata_format == "pnp":
-                perftexts.append("[%s]" % check_command)
-            perftext = "|" + (" ".join(perftexts))
+    perftexts = [_convert_perf_data(p) for p in perfdata]
+    if perftexts:
+        check_command = _extract_check_command(infotext)
+        if check_command and config.perfdata_format == "pnp":
+            perftexts.append("[%s]" % check_command)
+        perftext = "|" + (" ".join(perftexts))
+    else:
+        perftext = ""
 
     if _submit_to_core:
         _do_submit_to_core(host, servicedesc, state, infotext + perftext, cache_info)

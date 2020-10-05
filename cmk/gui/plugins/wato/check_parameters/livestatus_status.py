@@ -126,6 +126,32 @@ def _parameter_valuespec_livestatus_status():
                            default_value="90",
                        ),
                    ])),
+            ("helper_usage_fetcher",
+             Tuple(title=_("Levels Helper usage fetcher"),
+                   help=_("Set Levels for the fetcher helper Usage"),
+                   elements=[
+                       Percentage(
+                           title=_("Warning at or above"),
+                           default_value="40",
+                       ),
+                       Percentage(
+                           title=_("Critical at or above"),
+                           default_value="80",
+                       ),
+                   ])),
+            ("helper_usage_checker",
+             Tuple(title=_("Levels Helper usage checker"),
+                   help=_("Set Levels for the checker helper Usage"),
+                   elements=[
+                       Percentage(
+                           title=_("Warning at or above"),
+                           default_value="40",
+                       ),
+                       Percentage(
+                           title=_("Critical at or above"),
+                           default_value="80",
+                       ),
+                   ])),
             ("livestatus_usage",
              Tuple(title=_("Levels Livestatus Usage"),
                    help=_("Set Levels for the Checkmk Livestatus Usage"),
@@ -191,5 +217,5 @@ rulespec_registry.register(
         item_spec=lambda: TextAscii(title=_("Name of the monitoring site"),),
         match_type="dict",
         parameter_valuespec=_parameter_valuespec_livestatus_status,
-        title=lambda: _("Performance and settings of a Check_MK site"),
+        title=lambda: _("Checkmk site performance and settings"),
     ))

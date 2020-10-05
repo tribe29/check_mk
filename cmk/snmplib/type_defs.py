@@ -6,11 +6,25 @@
 
 import abc
 import collections
+import logging
 import string
-from typing import Any, AnyStr, Callable, Dict, Iterable, List, NamedTuple, Optional, Tuple, Union
+from typing import (
+    Any,
+    AnyStr,
+    Callable,
+    Dict,
+    Iterable,
+    List,
+    NamedTuple,
+    Optional,
+    Tuple,
+    TypeVar,
+    Union,
+)
 
 from six import ensure_str
 
+from cmk.utils.type_defs import AgentRawData as _AgentRawData
 from cmk.utils.type_defs import CheckPluginNameStr as _CheckPluginName
 from cmk.utils.type_defs import HostAddress as _HostAddress
 from cmk.utils.type_defs import HostName as _HostName
@@ -28,20 +42,10 @@ SNMPSections = Dict[_SectionName, SNMPSectionContent]
 SNMPPersistedSection = Tuple[int, int, SNMPSectionContent]
 SNMPPersistedSections = Dict[_SectionName, SNMPPersistedSection]
 SNMPRawData = SNMPSections
-SNMPColumn = Union[str, int, Tuple[SNMPValueEncoding, str]]
-SNMPColumns = List[SNMPColumn]
 OID = str
-OIDWithColumns = Tuple[OID, SNMPColumns]
-OIDWithSubOIDsAndColumns = Tuple[OID, List[OID], SNMPColumns]
 OIDFunction = Callable[[OID, Optional[SNMPDecodedString], Optional[_CheckPluginName]],
                        Optional[SNMPDecodedString]]
 SNMPScanFunction = Callable[[OIDFunction], bool]
-# TODO (CMK-4490): Typing here is just wrong as there is no practical
-# difference between an OIDWithColumns and OIDWithSubOIDsAndColumns with
-# an empty List[OID].
-OIDSingleInfo = Union[OIDWithColumns, OIDWithSubOIDsAndColumns]
-OIDMultiInfo = List[OIDSingleInfo]
-OIDInfo = Union[OIDSingleInfo, OIDMultiInfo]
 SNMPRawValue = bytes
 SNMPRowInfo = List[Tuple[OID, SNMPRawValue]]
 
@@ -66,6 +70,11 @@ SNMPCredentials = Union[SNMPCommunity, Tuple[str, ...]]
 SNMPTiming = Dict
 
 SNMPDetectAtom = Tuple[str, str, bool]  # (oid, regex_pattern, expected_match)
+
+# TODO(ml): This type does not really belong here but there currently
+#           is not better place.
+AbstractRawData = Union[_AgentRawData, SNMPRawData]
+TRawData = TypeVar("TRawData", bound=AbstractRawData)
 
 
 # make this a class in order to hide the List implementation from the sphinx doc!
@@ -125,8 +134,9 @@ class SNMPHostConfig(
 
 
 class ABCSNMPBackend(metaclass=abc.ABCMeta):
-    def __init__(self, snmp_config: SNMPHostConfig) -> None:
+    def __init__(self, snmp_config: SNMPHostConfig, logger: logging.Logger) -> None:
         super(ABCSNMPBackend, self).__init__()
+        self._logger = logger
         self.config = snmp_config
 
     @property

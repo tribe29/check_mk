@@ -80,7 +80,7 @@ from cmk.gui.plugins.visuals.utils import (
 
 # Needed for legacy (pre 1.6) plugins
 from cmk.gui.plugins.visuals.utils import (  # noqa: F401 # pylint: disable=unused-import
-    Filter, FilterTime, FilterTristate, FilterUnicodeFilter,
+    Filter, FilterTime, FilterTristate,
 )
 from cmk.gui.permissions import permission_registry
 
@@ -744,13 +744,13 @@ def render_context_specs(visual, context_specs):
         return
 
     forms.header(_("Context / Search Filters"))
+    # Trick: the field "context" contains a dictionary with
+    # all filter settings, from which the value spec will automatically
+    # extract those that it needs.
+    value = visual.get('context', {})
     for info_key, spec in context_specs:
         forms.section(spec.title())
         ident = 'context_' + info_key
-        # Trick: the field "context" contains a dictionary with
-        # all filter settings, from which the value spec will automatically
-        # extract those that it needs.
-        value = visual.get('context', {})
         spec.render_input(ident, value)
 
 
@@ -933,7 +933,7 @@ def page_edit_visual(what,
                                 'context buttons linking to the %s instead of the regular title.') %
                          visual_type.title,
                          size=26)),
-            ('icon', IconSelector(title=_('Button Icon'),)),
+            ('icon', IconSelector(title=_('Button Icon'))),
             ('visibility', Dictionary(
                 title=_('Visibility'),
                 elements=visibility_elements,
@@ -1064,8 +1064,10 @@ def page_edit_visual(what,
 
 
 def show_filter(f: Filter) -> None:
-    html.open_div(class_=["floatfilter", "double" if f.double_height() else "single", f.ident])
-    html.div(f.title, class_="legend")
+    html.open_div(class_=["floatfilter", f.ident])
+    html.open_div(class_="legend")
+    html.span(f.title)
+    html.close_div()
     html.open_div(class_="content")
     try:
         with html.plugged():
@@ -1076,7 +1078,7 @@ def show_filter(f: Filter) -> None:
         tb = sys.exc_info()[2]
         tbs = ['Traceback (most recent call last):\n']
         tbs += traceback.format_tb(tb)
-        html.icon(_("This filter cannot be displayed") + " (%s)\n%s" % (e, "".join(tbs)), "alert")
+        html.icon("alert", _("This filter cannot be displayed") + " (%s)\n%s" % (e, "".join(tbs)))
         html.write_text(_("This filter cannot be displayed"))
     html.close_div()
     html.close_div()
@@ -1085,16 +1087,13 @@ def show_filter(f: Filter) -> None:
 def get_filter(name: str) -> Filter:
     """Returns the filter object identified by the given name
     Raises a KeyError in case a not existing filter is requested."""
-    # FIXME: register instances in filter_registry (CMK-5137)
-    return filter_registry[name]()  # type: ignore[call-arg]
+    return filter_registry[name]
 
 
 def filters_allowed_for_info(info: str) -> Dict[str, Filter]:
     """Returns a map of filter names and filter objects that are registered for the given info"""
     allowed = {}
-    for fname, filter_class in filter_registry.items():
-        # FIXME: register instances in filter_registry (CMK-5137)
-        filt = filter_class()  # type: ignore[call-arg]
+    for fname, filt in filter_registry.items():
         if filt.info is None or info == filt.info:
             allowed[fname] = filt
     return allowed
@@ -1254,10 +1253,7 @@ def get_context_from_uri_vars(only_infos: Optional[List[InfoName]] = None,
     single_info_keys = set(get_single_info_keys(single_infos))
 
     context: VisualContext = {}
-    for filter_name, filter_class in filter_registry.items():
-        # FIXME: register instances in filter_registry (CMK-5137)
-        filter_object = filter_class()  # type: ignore[call-arg]
-
+    for filter_name, filter_object in filter_registry.items():
         if only_infos is not None and filter_object.info not in only_infos:
             continue  # Skip filters related to not relevant infos
 
@@ -1266,11 +1262,15 @@ def get_context_from_uri_vars(only_infos: Optional[List[InfoName]] = None,
             if not html.request.has_var(varname):
                 continue  # Variable to set in environment
 
+            filter_value = html.request.get_str_input_mandatory(varname)
+            if not filter_value:
+                continue
+
             if varname in single_info_keys:
-                context[filter_name] = html.request.get_unicode_input_mandatory(varname)
+                context[filter_name] = filter_value
                 break
 
-            this_filter_vars[varname] = html.request.get_str_input_mandatory(varname)
+            this_filter_vars[varname] = filter_value
 
         if this_filter_vars:
             context[filter_name] = this_filter_vars
@@ -1309,22 +1309,44 @@ def get_filter_headers(table, infos, context):
                 html.request.set_var(filter_name, filter_vars)
 
         filter_headers = "".join(collect_filter_headers(infos, table))
-    return filter_headers, get_only_sites()
+    return filter_headers, get_only_sites_from_context(context)
 
 
-def get_only_sites() -> Optional[List[SiteId]]:
-    """Is the view limited to specific sites by request?"""
-    site_arg = html.request.var("site")
-    if site_arg:
-        return [SiteId(site_arg)]
+def get_only_sites_from_context(context: dict) -> Optional[List[SiteId]]:
+    """Gather possible existing "only sites" information from context
+
+      We need to deal with
+
+      a) all possible site filters (site and siteopt).
+      b) with single and multiple contexts
+
+      Single contexts are structured like this:
+
+      {"site": "sitename"}
+
+      Multiple contexts are structured like this:
+
+      {"site": {"site": "sitename"}}
+
+      The difference is no fault or "old" data structure. We can have both kind of structures.
+      These are the data structure the visuals work with.
+      """
+
+    for var in [("site"), ("siteopt")]:
+        if var in context:
+            if isinstance(context[var], dict):
+                site_name = context[var].get("site")
+                if site_name:
+                    return [SiteId(site_name)]
+                return None
+            return [SiteId(context[var])]
+
     return None
 
 
 def collect_filter_headers(info_keys, table):
     # Collect all available filters for these infos
-    for filter_class in filter_registry.values():
-        # FIXME: register instances in filter_registry (CMK-5137)
-        filter_obj = filter_class()  # type: ignore[call-arg]
+    for filter_obj in filter_registry.values():
         if filter_obj.info in info_keys and filter_obj.available():
             yield filter_obj.filter(table)
 
@@ -1401,6 +1423,60 @@ class VisualFilterList(ListOfMultiple):
         return self._filters.keys()
 
 
+class VisualFilterListWithAddPopup(VisualFilterList):
+    """Special form of the visual filter list to be used in the views and dashboards"""
+    @staticmethod
+    def filter_list_id(varprefix: str) -> str:
+        return "%s_popup_filter_list" % varprefix
+
+    def _show_add_elements(self, varprefix: str) -> None:
+        filter_list_id = VisualFilterListWithAddPopup.filter_list_id(varprefix)
+        filter_list_selected_id = filter_list_id + "_selected"
+
+        html.open_div(id_=filter_list_id, class_="popup_filter_list")
+        html.more_button(filter_list_id, 1)
+        for group in self._grouped_choices:
+            if not group.choices:
+                continue
+
+            group_id = "filter_group_" + "".join(group.title.split()).lower()
+
+            html.open_div(id_=group_id, class_="filter_group")
+            # Show / hide all entries of this group
+            html.a(group.title,
+                   href="",
+                   class_="filter_group_title",
+                   onclick="cmk.page_menu.toggle_filter_group_display(this.nextSibling)")
+
+            # Display all entries of this group
+            html.open_ul(class_="active")
+            for choice in group.choices:
+                filter_name = choice[0]
+
+                filter_obj = filter_registry[filter_name]
+                html.open_li(class_="advanced" if filter_obj.is_advanced else "basic")
+
+                html.a(choice[1].title() or filter_name,
+                       href="javascript:void(0)",
+                       onclick="cmk.valuespecs.listofmultiple_add(%s, %s, %s, this);"
+                       "cmk.page_menu.update_filter_list_scroll(%s)" %
+                       (json.dumps(varprefix), json.dumps(self._choice_page_name),
+                        json.dumps(self._page_request_vars), json.dumps(filter_list_selected_id)),
+                       id_="%s_add_%s" % (varprefix, filter_name))
+
+                html.close_li()
+            html.close_ul()
+
+            html.close_div()
+        html.close_div()
+        filters_applied = html.request.get_ascii_input("filled_in") == "filter"
+        html.javascript('cmk.valuespecs.listofmultiple_init(%s, %s);' %
+                        (json.dumps(varprefix), json.dumps(filters_applied)))
+        # TODO: Currently does not work, because the filter popup (a parent element) has a simplebar
+        # scrollbar. Need to investigate...
+        html.final_javascript("cmk.utils.add_simplebar_scrollbar(%s);" % json.dumps(filter_list_id))
+
+
 @page_registry.register_page("ajax_visual_filter_list_get_choice")
 class PageAjaxVisualFilterListGetChoice(ABCPageListOfMultipleGetChoice):
     def _get_choices(self, request):
@@ -1412,13 +1488,93 @@ class PageAjaxVisualFilterListGetChoice(ABCPageListOfMultipleGetChoice):
         ]
 
 
+def render_filter_form(info_list: List[InfoName], mandatory_filters: List[Tuple[str, ValueSpec]],
+                       context: VisualContext, page_name: str, reset_ajax_page: str) -> str:
+    with html.plugged():
+        show_filter_form(info_list, mandatory_filters, context, page_name, reset_ajax_page)
+        return html.drain()
+
+
+def show_filter_form(info_list: List[InfoName], mandatory_filters: List[Tuple[str, ValueSpec]],
+                     context: VisualContext, page_name: str, reset_ajax_page: str) -> None:
+    html.show_user_errors()
+    html.begin_form("filter", method="GET", add_transid=False)
+    varprefix = ""
+    mandatory_filter_names = [f[0] for f in mandatory_filters]
+    vs_filters = VisualFilterListWithAddPopup(info_list=info_list, ignore=mandatory_filter_names)
+
+    filter_list_id = VisualFilterListWithAddPopup.filter_list_id(varprefix)
+    filter_list_selected_id = filter_list_id + "_selected"
+    _show_filter_form_buttons(varprefix, filter_list_id, vs_filters._page_request_vars, page_name,
+                              reset_ajax_page)
+
+    html.open_div(id_=filter_list_selected_id, class_="side_popup_content")
+    try:
+        # Configure required single info keys (the ones that are not set by the config)
+        if mandatory_filters:
+            html.h2(_("Mandatory context"))
+            for filter_name, valuespec in mandatory_filters:
+                html.h3(valuespec.title())
+                valuespec.render_input(filter_name, None)
+
+        # Give the user the option to redefine filters configured in the dashboard config
+        # and also give the option to add some additional filters
+        if mandatory_filters:
+            html.h3(_("Additional context"))
+
+        vs_filters.render_input(varprefix, context)
+    except Exception:
+        # TODO: Analyse possible cycle
+        import cmk.gui.crash_reporting as crash_reporting
+        crash_reporting.handle_exception_as_gui_crash_report()
+    html.close_div()
+
+    forms.end()
+
+    html.hidden_fields()
+    html.end_form()
+    html.javascript("cmk.utils.add_simplebar_scrollbar(%s);" % json.dumps(filter_list_selected_id))
+
+    # The filter popup is shown automatically when it has been submitted before on page reload. To
+    # know that the user closed the popup after filtering, we have to hook into the close_popup
+    # function.
+    html.final_javascript(
+        "cmk.page_menu.register_on_open_handler('popup_filters', cmk.page_menu.on_filter_popup_open);"
+        "cmk.page_menu.register_on_close_handler('popup_filters', cmk.page_menu.on_filter_popup_close);"
+    )
+
+
+def _show_filter_form_buttons(varprefix: str, filter_list_id: str,
+                              page_request_vars: Optional[Dict[str, Any]], view_name: str,
+                              reset_ajax_page: str) -> None:
+    html.open_div(class_="side_popup_controls")
+
+    html.open_a(href="javascript:void(0);",
+                onclick="cmk.page_menu.toggle_popup_filter_list(this, %s)" %
+                json.dumps(filter_list_id),
+                class_="add")
+    html.icon("add")
+    html.div(html.render_text("Add filter"), class_="description")
+    html.close_a()
+
+    html.open_div(class_="update_buttons")
+    html.jsbutton("%s_reset" % varprefix,
+                  _("Reset"),
+                  cssclass="reset",
+                  onclick="cmk.valuespecs.visual_filter_list_reset(%s, %s, %s, %s)" %
+                  (json.dumps(varprefix), json.dumps(page_request_vars), json.dumps(view_name),
+                   json.dumps(reset_ajax_page)))
+    html.button("%s_apply" % varprefix, _("Apply filters"), cssclass="apply submit")
+    html.close_div()
+    html.close_div()
+
+
 # Realizes a Multisite/visual filter in a valuespec. It can render the filter form, get
 # the filled in values and provide the filled in information for persistance.
 class VisualFilter(ValueSpec):
     def __init__(self, name, **kwargs):
         self._name = name
-        # FIXME: register instances in filter_registry (CMK-5137)
-        self._filter = filter_registry[name]()  # type: ignore[call-arg]
+        self._filter = filter_registry[name]
 
         ValueSpec.__init__(self, **kwargs)
 
@@ -1502,7 +1658,7 @@ def unpack_context_after_editing(packed_context: Dict) -> VisualContext:
 
 
 def visual_page_breadcrumb(what: str, title: str, page_name: str) -> Breadcrumb:
-    breadcrumb = make_main_menu_breadcrumb(mega_menu_registry.menu_configure())
+    breadcrumb = make_main_menu_breadcrumb(mega_menu_registry.menu_customize())
 
     list_title = visual_type_registry[what]().plural_title
     breadcrumb.append(BreadcrumbItem(title=list_title.title(), url="edit_%s.py" % what))
@@ -1712,7 +1868,7 @@ def ajax_popup_add() -> None:
             html.open_a(href=entry.item.link.url,
                         onclick=entry.item.link.onclick,
                         target=entry.item.link.target)
-            html.icon(None, entry.icon_name or "trans")
+            html.icon(entry.icon_name or "trans")
             html.write(entry.title)
             html.close_a()
             html.close_li()

@@ -179,10 +179,10 @@ def jqm_page_index_topic_renderer(topic: str, items: Items) -> None:
 
 
 def page_login() -> None:
-    title = _("Check_MK Mobile")
+    title = _("Checkmk Mobile")
     mobile_html_head(title)
     jqm_page_header(title, id_="login")
-    html.div(_("Welcome to Check_MK Mobile."), id_="loginhead")
+    html.div(_("Welcome to Checkmk Mobile."), id_="loginhead")
 
     html.begin_form("login", method='POST', add_transid=False)
     # Keep information about original target URL
@@ -211,7 +211,7 @@ def page_login() -> None:
 
 @cmk.gui.pages.register("mobile")
 def page_index() -> None:
-    title = _("Check_MK Mobile")
+    title = _("Checkmk Mobile")
     mobile_html_head(title)
     jqm_page_header(title,
                     right_button=("javascript:document.location.reload();", _("Reload"), "refresh"),
@@ -229,7 +229,7 @@ def page_index() -> None:
 
             view = views.View(view_name, view_spec, context)
             view.row_limit = views.get_limit()
-            view.only_sites = views.get_only_sites()
+            view.only_sites = visuals.get_only_sites_from_context(context)
             view.user_sorters = views.get_user_sorters()
             view.want_checkboxes = views.get_want_checkboxes()
 
@@ -246,7 +246,7 @@ def page_index() -> None:
             this_title = '%s %s' % (view_spec.get("linktitle", view_spec["title"]), count)
             items.append((topic, url, this_title))
 
-    jqm_page_index(_("Check_MK Mobile"), items)
+    jqm_page_index(_("Checkmk Mobile"), items)
     # Link to non-mobile GUI
 
     html.hr()
@@ -287,7 +287,7 @@ def page_view() -> None:
 
     view = views.View(view_name, view_spec, context)
     view.row_limit = views.get_limit()
-    view.only_sites = views.get_only_sites()
+    view.only_sites = visuals.get_only_sites_from_context(context)
     view.user_sorters = views.get_user_sorters()
     view.want_checkboxes = views.get_want_checkboxes()
 
@@ -431,7 +431,7 @@ def _show_command_form(datasource: ABCDataSource, rows: Rows) -> None:
     html.open_div(**{"data-role": "collapsible-set"})
     for command_class in command_registry.values():
         command = command_class()
-        if what in command.tables and config.user.may(command.permission().name):
+        if what in command.tables and config.user.may(command.permission.name):
             html.open_div(class_=["command_group"], **{"data-role": "collapsible"})
             html.h3(command.title)
             html.open_p()

@@ -122,7 +122,7 @@ class MainModuleGlobalSettings(MainModule):
 
     @property
     def description(self):
-        return _("Global settings for Check_MK, Multisite and the monitoring core.")
+        return _("Global settings for Checkmk, Multisite and the monitoring core.")
 
     @property
     def sort_index(self):
@@ -180,7 +180,7 @@ class MainModuleRuleSearch(MainModule):
 
     @property
     def title(self):
-        return _("Search rules")
+        return _("Rule search")
 
     @property
     def icon(self):
@@ -196,7 +196,7 @@ class MainModuleRuleSearch(MainModule):
 
     @property
     def sort_index(self):
-        return 28
+        return 5
 
     @property
     def is_advanced(self):
@@ -254,7 +254,11 @@ class MainModuleHostAndServiceParameters(MainModule):
 
     @property
     def icon(self):
-        return "rulesets"
+        return "folder"
+
+    @property
+    def emblem(self):
+        return "settings"
 
     @property
     def permission(self):
@@ -324,7 +328,7 @@ class MainModuleNetworkingServices(MainModule):
 
     @property
     def icon(self):
-        return "rulesets"
+        return "network_services"
 
     @property
     def permission(self):
@@ -360,7 +364,7 @@ class MainModuleIntegrateNagiosPlugins(MainModule):
 
     @property
     def icon(self):
-        return "rulesets"
+        return "nagios"
 
     @property
     def permission(self):
@@ -368,7 +372,8 @@ class MainModuleIntegrateNagiosPlugins(MainModule):
 
     @property
     def description(self):
-        return _("Integrate custom nagios plugins (so called active checks)")
+        return _("Integrate [cms_active_checks#mrpe|custom nagios plugins] into the "
+                 "monitoring as active checks.")
 
     @property
     def sort_index(self):
@@ -801,41 +806,6 @@ class MainModuleTimeperiods(MainModule):
 
 
 @main_module_registry.register
-class MainModuleUserInterface(MainModule):
-    @property
-    def mode_or_url(self):
-        return "wato.py?mode=rulesets&group=user_interface"
-
-    @property
-    def topic(self):
-        return MainModuleTopicGeneral
-
-    @property
-    def title(self):
-        return _("User interface rules")
-
-    @property
-    def icon(self):
-        return "rulesets"
-
-    @property
-    def permission(self):
-        return "rulesets"
-
-    @property
-    def description(self):
-        return _("Configure rulesets setting user interface related settings")
-
-    @property
-    def sort_index(self):
-        return 60
-
-    @property
-    def is_advanced(self):
-        return True
-
-
-@main_module_registry.register
 class MainModuleSites(MainModule):
     @property
     def mode_or_url(self):
@@ -859,7 +829,7 @@ class MainModuleSites(MainModule):
 
     @property
     def description(self):
-        return _("Distributed monitoring using multiple Check_MK sites")
+        return _("Distributed monitoring using multiple Checkmk sites")
 
     @property
     def sort_index(self):
@@ -1134,7 +1104,11 @@ class MainModuleMonitoringRules(MainModule):
 
     @property
     def icon(self):
-        return "rulesets"
+        return "services"
+
+    @property
+    def emblem(self):
+        return "settings"
 
     @property
     def permission(self):
@@ -1169,7 +1143,7 @@ class MainModuleDiscoveryRules(MainModule):
 
     @property
     def icon(self):
-        return "rulesets"
+        return "service_discovery"
 
     @property
     def permission(self):
@@ -1279,7 +1253,7 @@ class MainModuleOtherAgents(MainModule):
 
     @property
     def icon(self):
-        return "download_agents"
+        return "os_other"
 
     @property
     def permission(self):
@@ -1314,7 +1288,11 @@ class MainModuleAgentAccessRules(MainModule):
 
     @property
     def icon(self):
-        return "rulesets"
+        return "agents"
+
+    @property
+    def emblem(self):
+        return "settings"
 
     @property
     def permission(self):
@@ -1349,7 +1327,7 @@ class MainModuleSNMPRules(MainModule):
 
     @property
     def icon(self):
-        return "rulesets"
+        return "snmp"
 
     @property
     def permission(self):
@@ -1384,7 +1362,7 @@ class MainModuleVMCloudContainer(MainModule):
 
     @property
     def icon(self):
-        return "rulesets"
+        return "cloud"
 
     @property
     def permission(self):
@@ -1419,7 +1397,7 @@ class MainModuleOtherIntegrations(MainModule):
 
     @property
     def icon(self):
-        return "rulesets"
+        return "integrations_other"
 
     @property
     def permission(self):
@@ -1454,7 +1432,7 @@ class MainModuleCustomIntegrations(MainModule):
 
     @property
     def icon(self):
-        return "rulesets"
+        return "integrations_custom"
 
     @property
     def permission(self):

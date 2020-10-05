@@ -355,7 +355,7 @@ export class AbstractLayoutStyle {
 
     get_default_node_force(node) {
         return this._layout_manager.get_node_positioning(node)[this.id()] = {weight: this.positioning_weight(),
-                                                                             style_type: this.type()}
+                                                                             type: this.type()}
     }
 
     // Computes offsets use for node translate
@@ -938,8 +938,8 @@ export class LayoutStyleHierarchy extends LayoutStyleHierarchyBase {
         let theme_prefix = this._layout_manager.viewport.main_instance.get_theme_prefix()
         this.add_enclosing_hull(this.selection, this._vertices)
         let elements = [
-            {node: this.style_root_node, type: "scale",  image: theme_prefix + "/images/icons/icons8-resize-filled-48.png", call: this.get_drag_callback(()=>this.resize_layer_drag())},
-            {node: this.style_root_node, type: "rotation", image: theme_prefix + "/images/icons/icons8-rotate-left-48.png", call: this.get_drag_callback(()=>this.change_rotation())}
+            {node: this.style_root_node, type: "scale",  image: theme_prefix + "/images/icon_resize.png", call: this.get_drag_callback(()=>this.resize_layer_drag())},
+            {node: this.style_root_node, type: "rotation", image: theme_prefix + "/images/icon_rotate_left.png", call: this.get_drag_callback(()=>this.change_rotation())}
         ]
         let coords = this._layout_manager.viewport.translate_to_zoom({x: this.style_root_node.x, y: this.style_root_node.y})
         this.add_option_icons(coords, elements)
@@ -1187,13 +1187,13 @@ export class LayoutStyleRadial extends LayoutStyleHierarchyBase {
         // Icons
         let theme_prefix = this._layout_manager.viewport.main_instance.get_theme_prefix()
         let elements = [
-            {node: this.style_root_node, type: "radius", image: theme_prefix + "/images/icons/icons8-resize-filled-48.png",
+            {node: this.style_root_node, type: "radius", image: theme_prefix + "/images/icon_resize.png",
              call: this.get_drag_callback(()=>this.change_radius())
             },
-            {node: this.style_root_node, type: "rotation", image: theme_prefix + "/images/icons/icons8-rotate-left-48.png",
+            {node: this.style_root_node, type: "rotation", image: theme_prefix + "/images/icon_rotate_left.png",
              call: this.get_drag_callback(()=>this.change_rotation())
             },
-            {node: this.style_root_node, type: "degree", image: theme_prefix + "/images/icons/icons8-pie-chart-filled-48.png",
+            {node: this.style_root_node, type: "degree", image: theme_prefix + "/images/icon_pie_chart.png",
              call: this.get_drag_callback(()=>this.change_degree())
             }
         ]
@@ -1421,7 +1421,7 @@ export class LayoutStyleExampleGenerator {
     }
 
     _update_viewport_visibility() {
-        if (this._style_settings.style_type == "none") {
+        if (this._style_settings.type == "none") {
             this._viewport_selection.style("display", "none")
             this._example_selection.style("display", "none")
         }
@@ -1432,14 +1432,14 @@ export class LayoutStyleExampleGenerator {
     }
 
     create_example(style_settings) {
-        this._style_settings = style_settings
-        this._render_style_choice(this._style_choice_selection)
-        this._update_viewport_visibility()
-        this._create_example_hierarchy(this._example_options)
+        this._style_settings = style_settings;
+        this._render_style_choice(this._style_choice_selection);
+        this._update_viewport_visibility();
+        this._create_example_hierarchy(this._example_options);
 
-        let style_config = {options: this._style_settings.style_config}
+        let style_config = {options: this._style_settings.style_config};
         let style_class = null
-        switch (this._style_settings.style_type) {
+        switch (this._style_settings.type) {
             case "none": {
                 return
             }
@@ -1479,12 +1479,12 @@ export class LayoutStyleExampleGenerator {
 
         style_choice_selection.selectAll("select").data([null]).enter()
                .append("select")
-                .attr("name", this._varprefix + "style_type")
+                .attr("name", this._varprefix + "type")
                 .on("change", ()=>this._changed_style())
                 .selectAll("option").data(style_choices).enter()
               .append("option")
                 .property("value", d=>d[0])
-                .property("selected", d=>d[0] == this._style_settings.style_type)
+                .property("selected", d=>d[0] == this._style_settings.type)
                 .text(d=>d[1])
     }
 
@@ -1492,7 +1492,7 @@ export class LayoutStyleExampleGenerator {
         let new_style_id = d3.select(d3.event.target).property("value")
         this._options_selection.selectAll("*").remove()
         this._viewport_selection.selectAll(".block_style_overlay").remove()
-        this.create_example({style_type: new_style_id, style_config: {}})
+        this.create_example({type: new_style_id, style_config: {}})
     }
 
     _render_example_settings(div_selection) {
@@ -1505,7 +1505,7 @@ export class LayoutStyleExampleGenerator {
 
         let options = []
         options.push(this._example_options.total_nodes)
-        if (this._style_settings.style_type != LayoutStyleBlock.prototype.type())
+        if (this._style_settings.type != LayoutStyleBlock.prototype.type())
             options.push(this._example_options.depth)
 
         let rows = table.selectAll("tr").data(options)
@@ -1630,7 +1630,7 @@ export class LayoutStyleExampleGenerator {
         let hierarchy_raw = {name: "Root node"}
         let cancel_delta = 1 / example_settings.depth.value
         // Maximum depth of block style is 1
-        if (this._style_settings.style_type == LayoutStyleBlock.prototype.type())
+        if (this._style_settings.type == LayoutStyleBlock.prototype.type())
             cancel_delta = 1
 
         _add_hierarchy_children(hierarchy_raw, cancel_delta, 1)

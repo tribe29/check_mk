@@ -16,6 +16,7 @@ _NEGATE = '@negate'  # negation in boolean lists
 
 monitoring_core = "nagios"  # other option: "cmc"
 mkeventd_enabled = False  # Set by OMD hook
+pnp4nagios_enabled = True  # Set by OMD hook
 # TODO: Is this one deprecated for a long time?
 agent_port = 6556
 agent_ports: _List = []
@@ -215,7 +216,7 @@ explicit_host_conf: _Dict = {}
 extra_service_conf: _Dict = {}
 extra_nagios_conf = ""
 service_descriptions: _Dict = {}
-# needed by WATO, ignored by Check_MK
+# needed by WATO, ignored by Checkmk
 host_attributes: _Dict = {}
 # special parameters for host/PING check_command
 ping_levels: _List = []
@@ -229,6 +230,7 @@ check_mk_exit_status: _List = []
 check_mk_agent_target_versions: _List = []
 check_periods: _List = []
 snmp_check_interval: _List = []
+snmp_exclude_sections: _List = []
 # Rulesets for inventory export hooks
 inv_exports: _Dict = {}
 # Rulesets for parameters of notification scripts
@@ -264,3 +266,5 @@ aggregation_output_format = "multiline"  # new in 1.1.6. Possible also: "multili
 aggr_summary_hostname = "%s-s"
 status_data_inventory: _List = []
 legacy_checks: _List = []
+
+logwatch_rules: _List = []

@@ -113,12 +113,21 @@ class MegaMenuRenderer:
         html.open_div(id_=more_id, class_=["main_menu", "more" if show_more else "less"])
         hide_entries_js = "cmk.popup_menu.mega_menu_hide_entries('%s')" % more_id
 
+        html.open_div(class_="navigation_bar")
+        html.div("", class_="search_bar")
         topics = menu.topics()
         if any_advanced_items(topics):
-            html.more_button(id_=more_id, dom_levels_up=1, additional_js=hide_entries_js)
+            html.open_div()
+            html.more_button(id_=more_id,
+                             dom_levels_up=3,
+                             additional_js=hide_entries_js,
+                             with_text=True)
+            html.close_div()
+        html.close_div()
         html.open_div(class_="content inner")
         for topic in topics:
             self._show_topic(topic, menu.name)
+        html.div(None, class_="sentinel")
         html.close_div()
         html.close_div()
         html.javascript(hide_entries_js)
@@ -140,10 +149,10 @@ class MegaMenuRenderer:
         html.open_a(class_="show_all_topics",
                     href="",
                     onclick="cmk.popup_menu.mega_menu_show_all_topics('%s')" % topic_id)
-        html.icon(title=_("Show all %s topics") % menu_id, icon="collapse_arrow")
+        html.icon(icon="collapse_arrow", title=_("Show all %s topics") % menu_id)
         html.close_a()
         if not config.user.get_attribute("icons_per_item") and topic.icon_name:
-            html.icon(title=None, icon=topic.icon_name)
+            html.icon(topic.icon_name)
         html.span(topic.title)
         html.close_h2()
 
@@ -167,7 +176,7 @@ class MegaMenuRenderer:
             onclick="cmk.popup_menu.close_popup()",
         )
         if config.user.get_attribute("icons_per_item") and item.icon_name:
-            html.icon(title=None, icon=item.icon_name)
+            html.icon(item.icon_name, emblem=item.emblem)
         html.write_text(item.title)
         html.close_a()
         html.close_li()

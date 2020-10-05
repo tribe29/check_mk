@@ -5,6 +5,7 @@
 # conditions defined in the file COPYING, which is part of this source code package.
 """Modes for managing users and contacts"""
 
+from typing import Iterator, Optional, Type
 import base64
 import traceback
 import time
@@ -41,6 +42,15 @@ from cmk.gui.valuespec import (
     DualListChoice,
     FixedValue,
 )
+from cmk.gui.breadcrumb import Breadcrumb
+from cmk.gui.page_menu import (
+    PageMenu,
+    PageMenuDropdown,
+    PageMenuTopic,
+    PageMenuEntry,
+    make_simple_link,
+    make_simple_form_page_menu,
+)
 from cmk.gui.watolib.users import delete_users, edit_users
 from cmk.gui.watolib.groups import load_contact_group_information
 from cmk.gui.watolib.global_settings import rulebased_notifications_enabled
@@ -49,7 +59,6 @@ from cmk.gui.plugins.wato import (
     WatoMode,
     mode_registry,
     wato_confirm,
-    global_buttons,
     make_action_link,
 )
 
@@ -77,25 +86,86 @@ class ModeUsers(WatoMode):
     def title(self):
         return _("Users")
 
-    def buttons(self):
-        global_buttons()
-        html.context_button(_("New user"), watolib.folder_preserving_link([("mode", "edit_user")]),
-                            "new")
-        if config.user.may("wato.custom_attributes"):
-            html.context_button(_("Custom attributes"),
-                                watolib.folder_preserving_link([("mode", "user_attrs")]),
-                                "custom_attr")
+    def page_menu(self, breadcrumb: Breadcrumb) -> PageMenu:
+        return PageMenu(
+            dropdowns=[
+                PageMenuDropdown(
+                    name="users",
+                    title=_("Users"),
+                    topics=[
+                        PageMenuTopic(
+                            title=_("Add user"),
+                            entries=[
+                                PageMenuEntry(
+                                    title=_("Add user"),
+                                    icon_name="new",
+                                    item=make_simple_link(
+                                        watolib.folder_preserving_link([("mode", "edit_user")])),
+                                    is_shortcut=True,
+                                    is_suggested=True,
+                                ),
+                            ],
+                        ),
+                        PageMenuTopic(
+                            title=_("Synchronized users"),
+                            entries=list(self._page_menu_entries_synchronized_users()),
+                        ),
+                        PageMenuTopic(
+                            title=_("Notify users"),
+                            entries=list(self._page_menu_entries_notify_users()),
+                        ),
+                    ],
+                ),
+                PageMenuDropdown(
+                    name="related",
+                    title=_("Related"),
+                    topics=[
+                        PageMenuTopic(
+                            title=_("Setup"),
+                            entries=list(self._page_menu_entries_related()),
+                        ),
+                    ],
+                ),
+            ],
+            breadcrumb=breadcrumb,
+        )
+
+    def _page_menu_entries_synchronized_users(self) -> Iterator[PageMenuEntry]:
         if userdb.sync_possible():
             if not self._job_snapshot.is_active():
-                html.context_button(_("Sync users"), html.makeactionuri([("_sync", 1)]),
-                                    "replicate")
-                html.context_button(_("Last sync result"), self._job.detail_url(),
-                                    "background_job_details")
+                yield PageMenuEntry(
+                    title=_("Synchronize users"),
+                    icon_name="replicate",
+                    item=make_simple_link(html.makeactionuri([("_sync", 1)])),
+                )
 
+                yield PageMenuEntry(
+                    title=_("Last synchronization result"),
+                    icon_name="background_job_details",
+                    item=make_simple_link(self._job.detail_url()),
+                )
+
+    def _page_menu_entries_notify_users(self) -> Iterator[PageMenuEntry]:
         if config.user.may("general.notify"):
-            html.context_button(_("Notify users"), 'notify.py', "notification")
-        html.context_button(_("LDAP connections"),
-                            watolib.folder_preserving_link([("mode", "ldap_config")]), "ldap")
+            yield PageMenuEntry(
+                title=_("Notify users"),
+                icon_name="notification",
+                item=make_simple_link("notify.py"),
+            )
+
+    def _page_menu_entries_related(self) -> Iterator[PageMenuEntry]:
+        if config.user.may("wato.custom_attributes"):
+            yield PageMenuEntry(
+                title=_("Custom attributes"),
+                icon_name="custom_attr",
+                item=make_simple_link(watolib.folder_preserving_link([("mode", "user_attrs")])),
+            )
+
+        yield PageMenuEntry(
+            title=_("LDAP & Active Directory"),
+            icon_name="ldap",
+            item=make_simple_link(watolib.folder_preserving_link([("mode", "ldap_config")])),
+        )
 
     def action(self):
         if html.request.var('_delete'):
@@ -265,8 +335,9 @@ class ModeUsers(WatoMode):
                 table.cell(_("ID"), uid)
 
                 # Online/Offline
-                if config.save_user_access_times:
-                    last_seen = user.get('last_seen', 0)
+                if config.user.may("wato.show_last_user_activity"):
+                    last_seen = userdb.get_last_activity(uid, user)
+                    user.get('last_seen', 0)
                     if last_seen >= online_threshold:
                         title = _('Online')
                         img_txt = 'online'
@@ -279,7 +350,7 @@ class ModeUsers(WatoMode):
 
                     title += ' (%s %s)' % (render.date(last_seen), render.time_of_day(last_seen))
                     table.cell(_("Act."))
-                    html.icon(title, img_txt)
+                    html.icon(img_txt, title)
 
                     table.cell(_("Last seen"))
                     if last_seen != 0:
@@ -313,7 +384,7 @@ class ModeUsers(WatoMode):
 
                 table.cell(_("State"))
                 if user.get("locked", False):
-                    html.icon(_('The login is currently locked'), 'user_locked')
+                    html.icon('user_locked', _('The login is currently locked'))
 
                 if "disable_notifications" in user and isinstance(user["disable_notifications"],
                                                                   bool):
@@ -322,7 +393,7 @@ class ModeUsers(WatoMode):
                     disable_notifications_opts = user.get("disable_notifications", {})
 
                 if disable_notifications_opts.get("disable", False):
-                    html.icon(_('Notifications are disabled'), 'notif_disabled')
+                    html.icon('notif_disabled', _('Notifications are disabled'))
 
                 # Full name / Alias
                 table.text_cell(_("Alias"), user.get("alias", ""))
@@ -421,6 +492,10 @@ class ModeEditUser(WatoMode):
     def permissions(cls):
         return ["users"]
 
+    @classmethod
+    def parent_mode(cls) -> Optional[Type[WatoMode]]:
+        return ModeUsers
+
     def _breadcrumb_url(self) -> str:
         return html.makeuri_contextless([("mode", self.name()), ("edit", self._user_id)],
                                         filename="wato.py")
@@ -462,16 +537,36 @@ class ModeEditUser(WatoMode):
 
     def title(self):
         if self._is_new_user:
-            return _("Create new user")
+            return _("Add user")
         return _("Edit user %s") % self._user_id
 
-    def buttons(self):
-        html.context_button(_("Users"), watolib.folder_preserving_link([("mode", "users")]), "back")
+    def page_menu(self, breadcrumb: Breadcrumb) -> PageMenu:
+        menu = make_simple_form_page_menu(breadcrumb, form_name="user", button_name="save")
+
+        menu.dropdowns.insert(
+            1,
+            PageMenuDropdown(
+                name="related",
+                title=_("Related"),
+                topics=[
+                    PageMenuTopic(
+                        title=_("Setup"),
+                        entries=list(self._page_menu_entries_related()),
+                    ),
+                ],
+            ))
+
+        return menu
+
+    def _page_menu_entries_related(self) -> Iterator[PageMenuEntry]:
         if self._rbn_enabled and not self._is_new_user:
-            html.context_button(
-                _("Notifications"),
-                watolib.folder_preserving_link([("mode", "user_notifications"),
-                                                ("user", self._user_id)]), "notifications")
+            yield PageMenuEntry(
+                title=_("Notifications"),
+                icon_name="notifications",
+                item=make_simple_link(
+                    watolib.folder_preserving_link([("mode", "user_notifications"),
+                                                    ("user", self._user_id)])),
+            )
 
     def action(self):
         if not html.check_transaction():
@@ -936,7 +1031,6 @@ class ModeEditUser(WatoMode):
         # --notify, we could directly access the data in the account with the need
         # to store values in the monitoring core. We'll see what future brings.
         forms.end()
-        html.button("save", _("Save"))
         if self._is_new_user:
             html.set_focus("user_id")
         else:
@@ -962,7 +1056,6 @@ class ModeEditUser(WatoMode):
             title=_("Authorized sites"),
             help=_("The sites the user is authorized to see in the GUI."),
             default_value=None,
-            style="dropdown",
             elements=[
                 FixedValue(
                     None,

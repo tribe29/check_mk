@@ -9,16 +9,24 @@ import abc
 import enum
 import string
 import sys
+from contextlib import suppress
 from typing import (
     Any,
     Dict,
+    Final,
+    Generic,
+    Iterable,
     List,
     Literal,
+    NamedTuple,
     NewType,
+    NoReturn,
     Optional,
     Set,
     Tuple,
+    Type,
     TypedDict,
+    TypeVar,
     Union,
 )
 
@@ -34,7 +42,6 @@ RulesetName = str
 RuleValue = Any  # TODO: Improve this type
 RuleSpec = Dict[str, Any]  # TODO: Improve this type
 Ruleset = List[RuleSpec]  # TODO: Improve this type
-MetricName = str
 CheckPluginNameStr = str
 ActiveCheckPluginName = str
 Item = Optional[str]
@@ -59,9 +66,12 @@ ServiceState = int
 HostState = int
 ServiceDetails = str
 ServiceAdditionalDetails = str
-# TODO: Specify this  (see cmk/base/checking.py::_convert_perf_data)
-Metric = List
-ServiceCheckResult = Tuple[ServiceState, ServiceDetails, List[Metric]]
+
+MetricName = str
+MetricTuple = Tuple[MetricName, float, Optional[float], Optional[float], Optional[float],
+                    Optional[float],]
+
+ServiceCheckResult = Tuple[ServiceState, ServiceDetails, List[MetricTuple]]
 
 UserId = NewType("UserId", str)
 EventRule = Dict[str, Any]  # TODO Improve this
@@ -72,6 +82,10 @@ AgentConfig = Dict[str, Any]  # TODO Split into more sub configs
 # TODO(au): Replace usage with AgentPackagePlatform
 # But we need complete typing in cmk.gui.cee.agent_bakery first before we can safely do this.
 BakeryOpSys = NewType("BakeryOpSys", str)
+
+LATEST_SERIAL: Final[Literal["latest"]] = "latest"
+ConfigSerial = NewType("ConfigSerial", str)
+OptionalConfigSerial = Union[ConfigSerial, Literal["latest"]]
 
 
 class AgentPackagePlatform(enum.Enum):
@@ -126,6 +140,46 @@ class BakerySigningCredentials(TypedDict):
 # TODO: TimeperiodSpec should really be a class or at least a NamedTuple! We
 # can easily transform back and forth for serialization.
 TimeperiodSpec = Dict[str, Union[str, List[Tuple[str, str]]]]
+
+TProtocol = TypeVar("TProtocol", bound="Protocol")
+
+
+class Protocol(abc.ABC):
+    """Base class for serializable data.
+
+    Note:
+        This should be usable as a type. Do not add any
+        concrete implementation here.
+    """
+    def __eq__(self, other: Any) -> bool:
+        with suppress(TypeError):
+            return bytes(self) == bytes(other)
+        return NotImplemented
+
+    def __hash__(self) -> int:
+        return hash(bytes(self))
+
+    def __add__(self, other: Any) -> bytes:
+        with suppress(TypeError):
+            return bytes(self) + bytes(other)
+        return NotImplemented
+
+    def __radd__(self, other: Any) -> bytes:
+        with suppress(TypeError):
+            return bytes(other) + bytes(self)
+        return NotImplemented
+
+    def __len__(self) -> int:
+        return len(bytes(self))
+
+    @abc.abstractmethod
+    def __bytes__(self) -> bytes:
+        raise NotImplementedError
+
+    @classmethod
+    @abc.abstractmethod
+    def from_bytes(cls: Type[TProtocol], data: bytes) -> TProtocol:
+        raise NotImplementedError
 
 
 class ABCName(abc.ABC):
@@ -244,6 +298,195 @@ class SourceType(enum.Enum):
     """Classification of management sources vs regular hosts"""
     HOST = "HOST"
     MANAGEMENT = "MANAGEMENT"
+
+
+T_co = TypeVar("T_co", covariant=True)
+E_co = TypeVar("E_co", covariant=True)
+
+
+class Result(Generic[T_co, E_co], abc.ABC):
+    """An error container.
+
+    This error container was inspired by a variety of such containers
+    from other programming languages.
+
+    See Also:
+
+        The list is sorted alphabetically by programming language:
+
+        - C++: http://www.open-std.org/jtc1/sc22/wg21/docs/papers/2017/p0323r4.html
+        - Haskell: https://hackage.haskell.org/package/category-extras-0.52.0/docs/Control-Monad-Either.html
+        - OCaml: https://doc.rust-lang.org/std/result/enum.Result.html
+        - Rust: https://caml.inria.fr/pub/docs/manual-ocaml/libref/Result.html
+
+        We use the OCaml API without the purely functional interface, that is,
+        without `join`, `bind`, `fold` or `map`.
+
+    """
+    __slots__ = ()
+
+    @abc.abstractmethod
+    def __hash__(self) -> int:
+        raise NotImplementedError
+
+    @abc.abstractmethod
+    def __eq__(self, other: Any) -> bool:
+        raise NotImplementedError
+
+    def __ne__(self, other: Any) -> bool:
+        return not self == other
+
+    @abc.abstractmethod
+    def __lt__(self, other: Any) -> bool:
+        raise NotImplementedError
+
+    @abc.abstractmethod
+    def __gt__(self, other: Any) -> bool:
+        raise NotImplementedError
+
+    def __le__(self, other: Any) -> bool:
+        return self < other or self == other
+
+    def __ge__(self, other: Any) -> bool:
+        return self > other or self == other
+
+    @abc.abstractmethod
+    def __iter__(self) -> Iterable[T_co]:
+        raise NotImplementedError
+
+    @property
+    @abc.abstractmethod
+    def ok(self) -> T_co:
+        raise NotImplementedError
+
+    @property
+    @abc.abstractmethod
+    def error(self) -> E_co:
+        raise NotImplementedError
+
+    def value(self, default: T_co) -> T_co:  # type: ignore[misc]
+        return default if self.is_error() else self.ok
+
+    @abc.abstractmethod
+    def is_ok(self) -> bool:
+        raise NotImplementedError
+
+    @abc.abstractmethod
+    def is_error(self) -> bool:
+        raise NotImplementedError
+
+
+class OKResult(Result[T_co, E_co]):
+    __slots__ = ["_ok"]
+
+    def __init__(self, ok: T_co):
+        self._ok: Final[T_co] = ok
+
+    def __repr__(self):
+        return "%s(%r)" % (type(self).__name__, self.ok)
+
+    def __hash__(self) -> int:
+        return hash(self.ok)
+
+    def __eq__(self, other: Any) -> bool:
+        if not isinstance(other, Result):
+            return NotImplemented
+        if not isinstance(other, OKResult):
+            return False
+        return self.ok == other.ok
+
+    def __lt__(self, other: Any) -> bool:
+        if not isinstance(other, Result):
+            return NotImplemented
+        if isinstance(other, ErrorResult):
+            return True
+        assert isinstance(other, OKResult)
+        return self.ok < other.ok
+
+    def __gt__(self, other: Any) -> bool:
+        if not isinstance(other, Result):
+            return NotImplemented
+        if isinstance(other, ErrorResult):
+            return False
+        assert isinstance(other, OKResult)
+        return self.ok > other.ok
+
+    def __iter__(self) -> Iterable[T_co]:
+        return iter((self.ok,))
+
+    @property
+    def ok(self) -> T_co:
+        return self._ok
+
+    @property
+    def error(self) -> NoReturn:
+        raise ValueError(self)
+
+    def is_ok(self) -> bool:
+        return True
+
+    def is_error(self) -> bool:
+        return False
+
+
+class ErrorResult(Result[T_co, E_co]):
+    __slots__ = ["_error"]
+
+    def __init__(self, error: E_co):
+        self._error: Final[E_co] = error
+
+    def __repr__(self):
+        return "%s(%r)" % (type(self).__name__, self.error)
+
+    def __hash__(self) -> int:
+        return hash(self.error)
+
+    def __eq__(self, other: Any) -> bool:
+        if not isinstance(other, Result):
+            return NotImplemented
+        if not isinstance(other, ErrorResult):
+            return False
+        return self.error == other.error
+
+    def __lt__(self, other: Any) -> bool:
+        if not isinstance(other, Result):
+            return NotImplemented
+        if isinstance(other, OKResult):
+            return False
+        assert isinstance(other, ErrorResult)
+        return self._error < other._error
+
+    def __gt__(self, other: Any) -> bool:
+        if not isinstance(other, Result):
+            return NotImplemented
+        if isinstance(other, OKResult):
+            return True
+        assert isinstance(other, ErrorResult)
+        return self._error > other._error
+
+    def __iter__(self) -> Iterable[T_co]:
+        return iter(())
+
+    @property
+    def ok(self) -> NoReturn:
+        raise ValueError(self)
+
+    @property
+    def error(self) -> E_co:
+        return self._error
+
+    def is_ok(self) -> bool:
+        return False
+
+    def is_error(self) -> bool:
+        return True
+
+
+HostKey = NamedTuple("HostKey", [
+    ("hostname", HostName),
+    ("ipaddress", Optional[HostAddress]),
+    ("source_type", SourceType),
+])
 
 
 class OIDSpec:

@@ -5,13 +5,13 @@
 # conditions defined in the file COPYING, which is part of this source code package.
 import time
 
-from .agent_based_api.v0.type_defs import (
-    CheckGenerator,
-    DiscoveryGenerator,
+from .agent_based_api.v1.type_defs import (
+    CheckResult,
+    DiscoveryResult,
     Parameters,
     SNMPStringTable,
 )
-from .agent_based_api.v0 import check_levels, exists, register, render, Service, SNMPTree
+from .agent_based_api.v1 import check_levels, exists, register, render, Service, SNMPTree
 
 
 def parse_snmp_uptime(string_table: SNMPStringTable) -> int:
@@ -61,12 +61,12 @@ register.snmp_section(
 )
 
 
-def discover_snmp_uptime(section: int) -> DiscoveryGenerator:
+def discover_snmp_uptime(section: int) -> DiscoveryResult:
     if section:
         yield Service()
 
 
-def check_snmp_uptime(params: Parameters, section: int) -> CheckGenerator:
+def check_snmp_uptime(params: Parameters, section: int) -> CheckResult:
     if params is None:  # legacy: support older versions of parameters
         params = {}
 

@@ -151,7 +151,7 @@ def test_diagnostics_element_local_files_content(tmp_path, _collectors):
             "checks": [name],
         }
 
-        packaging.create_package(package_info)
+        packaging.create(package_info)
 
     packaging.package_dir().mkdir(parents=True, exist_ok=True)
     name = "test-package"
@@ -168,6 +168,7 @@ def test_diagnostics_element_local_files_content(tmp_path, _collectors):
         "unpackaged",
         "parts",
         "optional_packages",
+        "disabled_packages",
     ]
     content = json.loads(filepath.open().read())
 
@@ -259,7 +260,6 @@ CONFIG_APACHE_TCP_ADDR='127.0.0.1'
 CONFIG_APACHE_TCP_PORT='5000'
 CONFIG_AUTOSTART='off'
 CONFIG_CORE='cmc'
-CONFIG_DOKUWIKI_AUTH='off'
 CONFIG_LIVEPROXYD='on'
 CONFIG_LIVESTATUS_TCP='off'
 CONFIG_LIVESTATUS_TCP_ONLY_FROM='0.0.0.0 ::/0'
@@ -290,7 +290,6 @@ CONFIG_TMPFS='on'""")
         'CONFIG_APACHE_TCP_PORT',
         'CONFIG_AUTOSTART',
         'CONFIG_CORE',
-        'CONFIG_DOKUWIKI_AUTH',
         'CONFIG_LIVEPROXYD',
         'CONFIG_LIVESTATUS_TCP',
         'CONFIG_LIVESTATUS_TCP_ONLY_FROM',
@@ -318,7 +317,6 @@ CONFIG_TMPFS='on'""")
             '5000',
             'off',
             'cmc',
-            'off',
             'on',
             'off',
             '0.0.0.0 ::/0',

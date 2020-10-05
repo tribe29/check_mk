@@ -629,15 +629,8 @@ def test_edit_htpasswd_users(web):  # noqa: F811 # pylint: disable=redefined-out
         web.delete_htpasswd_users(list(users.keys()))
 
 
-def test_discover_services(web):  # noqa: F811 # pylint: disable=redefined-outer-name
-    try:
-        web.add_host("test-host-discovery", attributes={
-            "ipaddress": "127.0.0.1",
-        })
-
-        web.discover_services("test-host-discovery")
-    finally:
-        web.delete_host("test-host-discovery")
+def test_discover_services(web, local_test_hosts):  # noqa: F811 # pylint: disable=redefined-outer-name
+    web.discover_services("test-host")
 
 
 def test_bulk_discovery_start_with_empty_hosts(web):  # noqa: F811 # pylint: disable=redefined-outer-name
@@ -676,12 +669,6 @@ def test_bulk_discovery_start_with_defaults(web, local_test_hosts):  # noqa: F81
     assert "discovery successful" in status["job"]["result_msg"]
     assert "discovery started" in status["job"]["output"]
     assert "test-host: discovery successful" in status["job"]["output"]
-    # FIXME:
-    #   There are supposed to be 63 services to be discovered. Due to the ongoing migration
-    #   however, the services in testlib.base:KNOWN_AUTO_MIGRATION_FAILURES can't be detected
-    #   right now. Please add the 63 in here once KNOWN_AUTO_MIGRATION_FAILURES is empty.
-    assert "55 added" in status["job"]["output"]
-    assert "discovery successful" in status["job"]["output"]
 
 
 def test_bulk_discovery_start_with_parameters(web, local_test_hosts):  # noqa: F811 # pylint: disable=redefined-outer-name
@@ -796,7 +783,7 @@ def test_get_graph_api(web, graph_test_config):  # noqa: F811 # pylint: disable=
     assert len(data["curves"]) == 5
     assert data["curves"][0]["title"] == "CPU time in user space"
     assert data["curves"][1]["title"] == "CPU time in operating system"
-    assert data["curves"][2]["title"] == "Time spent waiting for Check_MK agent"
+    assert data["curves"][2]["title"] == "Time spent waiting for Checkmk agent"
     assert data["curves"][3]["title"] == "Time spent waiting for special agent"
     assert data["curves"][4]["title"] == "Total execution time"
 
@@ -1088,7 +1075,7 @@ def test_get_graph_recipes(web, graph_test_config):  # noqa: F811 # pylint: disa
                         'max', 1.0
                     ],
                     u'line_type': u'stack',
-                    u'title': u'Time spent waiting for Check_MK agent',
+                    u'title': u'Time spent waiting for Checkmk agent',
                     u'unit': u's'
                 }, {
                     u'color': u'#00d1ff',

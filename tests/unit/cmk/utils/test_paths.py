@@ -10,7 +10,7 @@ from pathlib import Path
 from testlib import repo_path, import_module
 
 pathlib_paths = [
-    "core_discovered_host_labels_dir",
+    "core_helper_config_dir",
     "base_discovered_host_labels_dir",
     "discovered_host_labels_dir",
     "piggyback_dir",
@@ -22,6 +22,7 @@ pathlib_paths = [
     "mib_dir",
     "crash_dir",
     "optional_packages_dir",
+    "disabled_packages_dir",
     "local_share_dir",
     "local_checks_dir",
     "local_notifications_dir",

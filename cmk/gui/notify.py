@@ -18,7 +18,7 @@ import cmk.gui.utils as utils
 import cmk.gui.config as config
 import cmk.gui.userdb as userdb
 import cmk.gui.i18n
-from cmk.gui.i18n import _
+from cmk.gui.i18n import _, _l
 from cmk.gui.globals import html
 from cmk.gui.htmllib import HTML
 from cmk.gui.default_permissions import PermissionSectionGeneral
@@ -37,7 +37,15 @@ from cmk.gui.valuespec import (
     Optional,
     TextAreaUnicode,
 )
-from cmk.gui.breadcrumb import make_simple_page_breadcrumb
+from cmk.gui.breadcrumb import Breadcrumb, make_simple_page_breadcrumb
+from cmk.gui.page_menu import (
+    PageMenu,
+    PageMenuDropdown,
+    PageMenuTopic,
+    PageMenuEntry,
+    make_simple_link,
+    make_simple_form_page_menu,
+)
 from cmk.gui.main_menu import mega_menu_registry
 
 
@@ -99,28 +107,15 @@ def _notify_methods() -> Dict[str, Dict[str, Any]]:
     }
 
 
-@permission_registry.register
-class NotifyUsersPermission(Permission):
-    @property
-    def section(self):
-        return PermissionSectionGeneral
-
-    @property
-    def permission_name(self):
-        return "notify"
-
-    @property
-    def title(self):
-        return _("Notify Users")
-
-    @property
-    def description(self):
-        return _("This permissions allows users to send notifications to the users of "
-                 "the monitoring system using the web interface.")
-
-    @property
-    def defaults(self):
-        return ["admin"]
+permission_registry.register(
+    Permission(
+        section=PermissionSectionGeneral,
+        name="notify",
+        title=_l("Notify Users"),
+        description=_l("This permissions allows users to send notifications to the users of "
+                       "the monitoring system using the web interface."),
+        defaults=["admin"],
+    ))
 
 
 @cmk.gui.pages.register("notify")
@@ -130,11 +125,8 @@ def page_notify():
 
     title = _('Notify users')
     breadcrumb = make_simple_page_breadcrumb(mega_menu_registry.menu_setup(), title)
-    html.header(title, breadcrumb)
-
-    html.begin_context_buttons()
-    html.context_button(_("Users"), "wato.py?mode=users", "back")
-    html.end_context_buttons()
+    menu = _page_menu(breadcrumb)
+    html.header(title, breadcrumb, menu)
 
     vs_notify = _vs_notify()
 
@@ -149,11 +141,40 @@ def page_notify():
     html.begin_form("notify", method="POST")
     vs_notify.render_input_as_form("_notify", {})
 
-    html.button("save", _("Send notification"))
-
     html.hidden_fields()
     html.end_form()
     html.footer()
+
+
+def _page_menu(breadcrumb: Breadcrumb) -> PageMenu:
+    menu = make_simple_form_page_menu(
+        breadcrumb,
+        form_name="notify",
+        button_name="save",
+        save_title=_("Send notification"),
+        add_abort_link=False,
+    )
+
+    menu.dropdowns.insert(
+        1,
+        PageMenuDropdown(
+            name="related",
+            title=_("Related"),
+            topics=[
+                PageMenuTopic(
+                    title=_("Setup"),
+                    entries=[
+                        PageMenuEntry(
+                            title=_("Users"),
+                            icon_name="users",
+                            item=make_simple_link("wato.py?mode=users"),
+                        )
+                    ],
+                ),
+            ],
+        ))
+
+    return menu
 
 
 def _vs_notify():
@@ -167,10 +188,8 @@ def _vs_notify():
              allow_empty=False,
          )),
         #('contactgroup', _('All members of a contact group')),
+        ('online', _('All online users')),
     ]
-
-    if config.save_user_access_times:
-        dest_choices.append(('online', _('All online users')))
 
     return Dictionary(
         elements=[
@@ -325,7 +344,7 @@ def notify_mail(user_id, msg):
         sender_name = user_id
 
     # Code mostly taken from notify_via_email() from notify.py module
-    subject = _('Check_MK: Notification')
+    subject = _('Checkmk: Notification')
     body = _('''Greetings %s,
 
 %s sent you a notification:

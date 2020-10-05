@@ -331,8 +331,6 @@ $wato-data-table-border:		    null;
 $wato-data-table-border-bottom:		    null;
 $wato-data-table-box-shadow:		    null;
 
-$wato-post-contextlinks-border-top:	    null;
-
 $wato-info-margin:			    null;
 $wato-info-padding:			    null;
 
@@ -442,8 +440,6 @@ $table-headerleft-border-bottom:	    none;
 $agent-config-inner-title-bg-color:	    $grey-1;
 $agent-config-td-color:			    rgb(42, 42, 42);
 
-$service-container-groupheader-bg-color:    null;
-
 $pnp4nagios-img-filter:			    null;
 
 $matches-search-bg-color:		    $color-nuance-2;
@@ -455,8 +451,6 @@ $help-link-color:			    $font-color;
 $minority-font-color:			    null;
 
 $button-spacer-color:			    rgb(180, 180, 180);
-
-$td-h3-margin-top:			    null;
 
 $timeline-hilite-border:		    null;
 $timetable-hilite-filter:		    brightness(90%);
@@ -494,9 +488,11 @@ $scatterdot-hilite-color:		    rgb(0, 185, 255);
 /* TODO:  move variables defined for the UX project to the correct place */
 /* TODO:  adapt variables to modern theme */
 $page-header-height:                        58px;
+$popup-shadow-color:                        rgba(255, 255, 255, 0.2);
+$button-font-color-default:                 $black;
 $button-bg-color-default:                   rgb(53, 63, 74);
 $button-bg-color-secondary:                 $navbar-color;
-$button-bg-color-secondary-hover:           rgb(53, 63, 74);
+$button-bg-color-secondary-hover:           $base-color;
 $navigation-bg-color:                       $navbar-color;
 $page-menu-bg-color:                        $white;
 $snapin-bg-color:                           $navbar-color;
@@ -507,11 +503,17 @@ $filter-group-title-font-color:             $black;
 $popup-filters-border-radius:               2px;
 $popup-button-border:                       1px solid $grey-2;
 $popup-trigger-active-bg-color:             null;
-$popup-menu-bg-color:                       $base-color;
 $tactical-overview-th-font-color:	    rgba($font-color, .4);
 $tactical-overview-td-bg-color:		    $base-color;
 $snapin-heading-border-color:               rgba($font-color, 0.2);
 $snapin-description-font-color:             $font-color;
-$simplebar-track-bg-color:                  $bg-color;
+$simplebar-scrollbar-color:                 $navbar-color;
+$simplebar-scrollbar-width:                 5px;
 $select2-dropdown-bg-color:                 $bg-color;
 $select2-dropdown-highlight-color:          $bg-color-secondary;
+$popup-border:                              4px solid rgb(19, 211, 137);
+$popup-inner-border:                        1px solid $navbar-color;
+$filter-add-button-hover-brightness:        brightness(0);
+$floatfilter-legend-border:                 1px solid rgba($black, .2);
+$wato-h3-font-color:                        $font-color;
+$megamenu-navbar-height:                    60px;

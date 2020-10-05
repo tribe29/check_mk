@@ -44,6 +44,7 @@ def expected_items() -> Dict[str, List[str]]:
     maintenance_items = ['backup']
 
     if not cmk_version.is_raw_edition():
+        maintenance_items.append('license_usage')
         maintenance_items.append('mkps')
 
     maintenance_items += [
@@ -83,13 +84,12 @@ def expected_items() -> Dict[str, List[str]]:
         'agents': agents_items,
         'events': events_items,
         'general': [
+            'rule_search',
             'globalvars',
             'read_only',
-            'rule_search',
             'predefined_conditions',
             'timeperiods',
             'passwords',
-            'wato.py?mode=rulesets&group=user_interface',
             'sites',
             'auditlog',
             'icons',
@@ -104,8 +104,8 @@ def expected_items() -> Dict[str, List[str]]:
             'static_checks',
             'service_groups',
             'check_plugins',
-            'bi_packs',
         ],
+        'bi': ['bi_packs'],
         'users': users_items,
     }
 

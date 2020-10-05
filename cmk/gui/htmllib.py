@@ -979,7 +979,6 @@ class html(ABCHTMLGenerator):
 
         # rendering state
         self._header_sent = False
-        self._context_buttons_open = False
 
         # style options
         self._body_classes = ['main']
@@ -1070,13 +1069,21 @@ class html(ABCHTMLGenerator):
     def get_theme(self) -> str:
         return self._theme
 
+    def icon_themes(self) -> List[str]:
+        """Returns the themes where icons of a theme can be found in increasing order of importance.
+        By default the facelift theme provides all icons. If a theme wants to use different icons it
+        only needs to add those icons under the same name. See _detect_icon_path for a detailed list
+        of paths.
+        """
+        return ["facelift"] if self._theme == "facelift" else ["facelift", self._theme]
+
     def theme_url(self, rel_url: str) -> str:
         return "themes/%s/%s" % (self._theme, rel_url)
 
     def _verify_not_using_threaded_mpm(self) -> None:
         if self.request.is_multithread:
             raise MKGeneralException(
-                _("You are trying to Check_MK together with a threaded Apache multiprocessing module (MPM). "
+                _("You are trying to Checkmk together with a threaded Apache multiprocessing module (MPM). "
                   "Check_MK is only working with the prefork module. Please change the MPM module to make "
                   "Check_MK work."))
 
@@ -1600,7 +1607,7 @@ class html(ABCHTMLGenerator):
 
     # Make the browser load specified javascript files. We have some special handling here:
     # a) files which can not be found shal not be loaded
-    # b) in OMD environments, add the Check_MK version to the version (prevents update problems)
+    # b) in OMD environments, add the Checkmk version to the version (prevents update problems)
     # c) load the minified javascript when not in debug mode
     def javascript_filename_for_browser(self, jsname: str) -> Optional[str]:
         filename_for_browser = None
@@ -1678,8 +1685,6 @@ class html(ABCHTMLGenerator):
         classes = self._body_classes[:]
         if self.screenshotmode:
             classes += ["screenshotmode"]
-        if not self.foldable_container_is_open("suggestions", "all", True):
-            classes += ["hide_suggestions"]
         return classes
 
     def html_foot(self) -> None:
@@ -1715,7 +1720,9 @@ class html(ABCHTMLGenerator):
         self.close_div()  # titlebar
 
         if page_menu:
-            PageMenuRenderer().show(page_menu)
+            PageMenuRenderer().show(
+                page_menu,
+                hide_suggestions=not self.foldable_container_is_open("suggestions", "all", True))
 
         self.close_div()  # top_heading
 
@@ -1743,7 +1750,7 @@ class html(ABCHTMLGenerator):
     def begin_page_content(self):
         content_id = "main_page_content"
         self.open_div(id_=content_id)
-        self.final_javascript("cmk.utils.add_simplebar_scrollbar(%s)" % json.dumps(content_id))
+        self.final_javascript("cmk.utils.content_scrollbar(%s)" % json.dumps(content_id))
 
     def end_page_content(self):
         self.close_div()
@@ -1816,7 +1823,11 @@ class html(ABCHTMLGenerator):
                        enctype="multipart/form-data" if method.lower() == "post" else None)
         self.hidden_field("filled_in", name, add_var=True)
         if add_transid:
-            self.hidden_field("_transid", str(self.transaction_manager.get()))
+            self.hidden_field(
+                "_transid",
+                str(self.transaction_manager.get()),
+                add_var=True,
+            )
         self.form_name = name
 
     def end_form(self) -> None:
@@ -2539,73 +2550,6 @@ class html(ABCHTMLGenerator):
         return "tree.%s.%s" % (treename, id_)
 
     #
-    # Context Buttons
-    #
-
-    def begin_context_buttons(self) -> None:
-        if not self._context_buttons_open:
-            self.open_div(class_="contextlinks")
-            self._context_buttons_open = True
-
-    def end_context_buttons(self) -> None:
-        if self._context_buttons_open:
-            self.div("", class_="end")
-            self.close_div()
-        self._context_buttons_open = False
-
-    def context_button(self,
-                       title: str,
-                       url: str,
-                       icon: Optional[str] = None,
-                       hot: bool = False,
-                       id_: Optional[str] = None,
-                       hover_title: Optional[str] = None,
-                       class_: CSSSpec = None) -> None:
-        self._context_button(title,
-                             url,
-                             icon=icon,
-                             hot=hot,
-                             id_=id_,
-                             hover_title=hover_title,
-                             class_=class_)
-
-    def _context_button(self,
-                        title: str,
-                        url: str,
-                        icon: Optional[str] = None,
-                        hot: bool = False,
-                        id_: Optional[str] = None,
-                        hover_title: Optional[str] = None,
-                        class_: CSSSpec = None) -> None:
-        title = escaping.escape_attribute(title)
-        display = "block"
-
-        if not self._context_buttons_open:
-            self.begin_context_buttons()
-
-        css_classes: List[Optional[str]] = ["contextlink"]
-        if hot:
-            css_classes.append("hot")
-        if class_:
-            if isinstance(class_, list):
-                css_classes.extend(class_)
-            else:
-                css_classes.append(class_)
-
-        self.open_div(class_=css_classes, id_=id_, style="display:%s;" % display)
-
-        self.open_a(href=url, title=hover_title)
-
-        if icon:
-            self.icon('', icon, cssclass="inline", middle=False)
-
-        self.span(title)
-
-        self.close_a()
-
-        self.close_div()
-
-    #
     # Floating Options
     #
 
@@ -2622,21 +2566,22 @@ class html(ABCHTMLGenerator):
     # HTML icon rendering
     #
 
-    # FIXME: Change order of input arguments in one: icon and render_icon!!
     def icon(self,
-             title: Optional[str],
              icon: str,
+             title: Optional[str] = None,
              middle: bool = True,
              id_: Optional[str] = None,
              cssclass: Optional[str] = None,
-             class_: CSSSpec = None) -> None:
+             class_: CSSSpec = None,
+             emblem: Optional[str] = None) -> None:
         self.write_html(
             self.render_icon(icon_name=icon,
                              title=title,
                              middle=middle,
                              id_=id_,
                              cssclass=cssclass,
-                             class_=class_))
+                             class_=class_,
+                             emblem=emblem))
 
     def empty_icon(self) -> None:
         self.write_html(self.render_icon("trans"))
@@ -2647,14 +2592,15 @@ class html(ABCHTMLGenerator):
                     middle: bool = True,
                     id_: Optional[str] = None,
                     cssclass: Optional[str] = None,
-                    class_: CSSSpec = None) -> HTML:
+                    class_: CSSSpec = None,
+                    emblem: Optional[str] = None) -> HTML:
         classes = ["icon", cssclass]
         if isinstance(class_, list):
             classes.extend(class_)
         else:
             classes.append(class_)
 
-        return self._render_start_tag(
+        icon = self._render_start_tag(
             'img',
             close_tag=True,
             title=title,
@@ -2664,9 +2610,14 @@ class html(ABCHTMLGenerator):
             src=(icon_name if "/" in icon_name else self._detect_icon_path(icon_name)),
         )
 
+        if emblem:
+            emblem_path = self._detect_icon_path("emblem_" + emblem)
+            return self.render_span(icon + self.render_img(emblem_path, class_="emblem"),
+                                    class_="emblem")
+        return icon
+
     def _detect_icon_path(self, icon_name: str) -> str:
-        """Detect from which place an icon shall be used and return it's path relative to
- htdocs/
+        """Detect from which place an icon shall be used and return it's path relative to htdocs/
 
         Priority:
         1. In case the modern-dark theme is active: <theme> = modern-dark -> priorities 3-6
@@ -2678,13 +2629,7 @@ class html(ABCHTMLGenerator):
         7. images/icons/[name].png in site local hierarchy
         8. images/icons/[name].png in standard hierarchy
         """
-
-        if self._theme == "modern-dark":
-            # in the modern-dark theme facelift images act as fallbacks
-            themes = [self._theme, "facelift"]
-        else:
-            themes = [self._theme]
-        for theme in themes:
+        for theme in self.icon_themes():
             rel_path = "share/check_mk/web/htdocs/themes/%s/images/icon_%s" % (theme, icon_name)
             for file_type in ["svg", "png"]:
                 for base_dir in [cmk.utils.paths.omd_root, cmk.utils.paths.omd_root + "/local"]:
@@ -2703,8 +2648,8 @@ class html(ABCHTMLGenerator):
                            style: Optional[str] = None,
                            target: Optional[str] = None,
                            cssclass: Optional[str] = None,
-                           class_: CSSSpec = None) -> HTML:
-
+                           class_: CSSSpec = None,
+                           emblem: Optional[str] = None) -> HTML:
         # Same API as other elements: class_ can be a list or string/None
         classes = [cssclass]
         if isinstance(class_, list):
@@ -2716,7 +2661,7 @@ class html(ABCHTMLGenerator):
         assert href is not None
 
         return self.render_a(
-            content=HTML(self.render_icon(icon, cssclass="iconbutton")),
+            content=HTML(self.render_icon(icon, emblem=emblem, cssclass="iconbutton")),
             href=href,
             title=title,
             id_=id_,
@@ -2736,23 +2681,34 @@ class html(ABCHTMLGenerator):
                     style: Optional[str] = None,
                     target: Optional[str] = None,
                     cssclass: Optional[str] = None,
-                    class_: CSSSpec = None) -> None:
+                    class_: CSSSpec = None,
+                    emblem: Optional[str] = None) -> None:
         self.write_html(
-            self.render_icon_button(url, title, icon, id_, onclick, style, target, cssclass,
-                                    class_))
+            self.render_icon_button(url, title, icon, id_, onclick, style, target, cssclass, class_,
+                                    emblem))
 
-    def more_button(self, id_: str, dom_levels_up: int, additional_js: str = "") -> None:
+    def more_button(self,
+                    id_: str,
+                    dom_levels_up: int,
+                    additional_js: str = "",
+                    with_text: bool = False) -> None:
         if config.user.get_attribute("ui_basic_advanced_mode") in ("enforce_basic",
                                                                    "enforce_advanced"):
             return
 
         self.open_a(href="javascript:void(0)",
-                    class_="more",
+                    class_=["more", "has_text" if with_text else ""],
                     onfocus="if (this.blur) this.blur();",
                     onclick="cmk.utils.toggle_more(this, %s, %d);%s" %
                     (json.dumps(id_), dom_levels_up, additional_js))
-        self.icon(title=_("Show more items"), icon="show_more", class_="show_more")
-        self.icon(title=_("Show less items"), icon="show_less", class_="show_less")
+        self.open_div(title="Show more items" if not with_text else "", class_="show_more")
+        if with_text:
+            self.span(_("show more"))
+        self.close_div()
+        self.open_div(title="Show less items" if not with_text else "", class_="show_less")
+        if with_text:
+            self.span(_("show less"))
+        self.close_div()
         self.close_a()
 
     def popup_trigger(self,

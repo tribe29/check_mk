@@ -55,7 +55,6 @@ def test_registered_modules():
         'wato.py?mode=rulesets&group=monconf',
         'wato.py?mode=rulesets&group=host_monconf',
         'wato.py?mode=rulesets&group=snmp',
-        'wato.py?mode=rulesets&group=user_interface',
         'wato.py?mode=rulesets&group=vm_cloud_container',
     ]
 
@@ -70,6 +69,7 @@ def test_registered_modules():
             'agents',
             'alert_handlers',
             'mkps',
+            'license_usage',
             'dcd_connections',
         ]
 

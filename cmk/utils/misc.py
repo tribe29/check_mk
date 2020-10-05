@@ -9,7 +9,7 @@ usable in all components of Check_MK
 Please try to find a better place for the things you want to put here."""
 
 from contextlib import contextmanager
-from inspect import getfullargspec as _getargspec
+import inspect
 import itertools
 import os
 from pathlib import Path
@@ -96,12 +96,12 @@ def total_size(o: Any, handlers: Optional[Dict] = None) -> int:
     return sizeof(o)
 
 
-# Works with Check_MK version (without tailing .cee and/or .demo)
+# Works with Checkmk version (without tailing .cee and/or .demo)
 def is_daily_build_version(v: str) -> bool:
     return len(v) == 10 or '-' in v
 
 
-# Works with Check_MK version (without tailing .cee and/or .demo)
+# Works with Checkmk version (without tailing .cee and/or .demo)
 def branch_of_daily_build(v: str) -> str:
     if len(v) == 10:
         return "master"
@@ -119,8 +119,7 @@ def cachefile_age(path: Union[Path, str]) -> float:
 
 
 def getfuncargs(func: Callable) -> List[str]:
-    # pylint is too dumb to see that we do NOT use the deprecated variant. :-P
-    return _getargspec(func).args  # pylint: disable=deprecated-method
+    return list(inspect.signature(func).parameters)
 
 
 def make_kwargs_for(function: Callable, **kwargs: Any) -> Dict[str, Any]:

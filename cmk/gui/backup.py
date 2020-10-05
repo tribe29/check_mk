@@ -3,12 +3,13 @@
 # Copyright (C) 2019 tribe29 GmbH - License: GNU General Public License v2
 # This file is part of Checkmk (https://checkmk.com). It is subject to the terms and
 # conditions defined in the file COPYING, which is part of this source code package.
+"""
+This module implements generic functionality of the Check_MK backup
+system. It is used to configure the site and system backup.
 
-# This module implements generic functionality of the Check_MK backup
-# system. It is used to configure the site and system backup.
-#
-# BE AWARE: This code is directly used by the appliance. So if you are
-# about to refactor things, you will have to care about the appliance!
+BE AWARE: This code is directly used by the appliance. So if you are
+about to refactor things, you will have to care about the appliance!
+"""
 
 import abc
 import errno
@@ -21,8 +22,9 @@ import signal
 import socket
 import subprocess
 import time
-from typing import Any, List, Optional, Tuple
+from typing import Any, List, Optional, Tuple, Iterator
 
+import cmk.utils.version as cmk_version
 import cmk.utils.render as render
 import cmk.utils.store as store
 from cmk.utils.schedule import next_scheduled_time
@@ -49,8 +51,16 @@ from cmk.gui.valuespec import (
 from cmk.gui.exceptions import HTTPRedirect, MKUserError, MKGeneralException
 from cmk.gui.i18n import _
 from cmk.gui.globals import html
-from cmk.gui.breadcrumb import make_simple_page_breadcrumb
 from cmk.gui.main_menu import mega_menu_registry
+from cmk.gui.breadcrumb import Breadcrumb, make_simple_page_breadcrumb
+from cmk.gui.page_menu import (
+    PageMenu,
+    PageMenuDropdown,
+    PageMenuTopic,
+    PageMenuEntry,
+    make_simple_link,
+    make_simple_form_page_menu,
+)
 
 #.
 #   .--Config--------------------------------------------------------------.
@@ -92,10 +102,6 @@ def site_config_path(site_id=None):
 
 def hostname():
     return socket.gethostname()
-
-
-def is_cma():
-    return os.path.exists("/etc/cma/cma.conf")
 
 
 def is_canonical(directory):
@@ -537,19 +543,63 @@ class PageBackup:
     def home_button(self):
         raise NotImplementedError()
 
-    def buttons(self):
-        self.home_button()
-        html.context_button(_("Backup targets"),
-                            html.makeuri_contextless([("mode", "backup_targets")]),
-                            "backup_targets")
-        html.context_button(_("Backup keys"), html.makeuri_contextless([("mode", "backup_keys")]),
-                            "backup_key")
+    def page_menu(self, breadcrumb: Breadcrumb) -> PageMenu:
+        if not self._may_edit_config():
+            return PageMenu(dropdowns=[], breadcrumb=breadcrumb)
+
+        return PageMenu(
+            dropdowns=[
+                PageMenuDropdown(
+                    name="backups",
+                    title=_("Backups"),
+                    topics=[
+                        PageMenuTopic(
+                            title=_("Setup"),
+                            entries=list(self._page_menu_entries_setup()),
+                        ),
+                        PageMenuTopic(
+                            title=_("Restore from backup"),
+                            entries=[
+                                PageMenuEntry(
+                                    title=_("Restore"),
+                                    icon_name="backup_restore",
+                                    item=make_simple_link(
+                                        html.makeuri_contextless([("mode", "backup_restore")])),
+                                    is_shortcut=True,
+                                    is_suggested=True,
+                                ),
+                            ],
+                        ),
+                    ],
+                ),
+            ],
+            breadcrumb=breadcrumb,
+        )
+
+    def _page_menu_entries_setup(self) -> Iterator[PageMenuEntry]:
+        yield PageMenuEntry(
+            title=_("Backup targets"),
+            icon_name="backup_targets",
+            item=make_simple_link(html.makeuri_contextless([("mode", "backup_targets")])),
+            is_shortcut=True,
+            is_suggested=True,
+        )
+        yield PageMenuEntry(
+            title=_("Backup encryption keys"),
+            icon_name="backup_key",
+            item=make_simple_link(html.makeuri_contextless([("mode", "backup_keys")])),
+            is_shortcut=True,
+            is_suggested=True,
+        )
+
         if self._may_edit_config():
-            html.context_button(_("New job"),
-                                html.makeuri_contextless([("mode", "edit_backup_job")]),
-                                "backup_job_new")
-        html.context_button(_("Restore"), html.makeuri_contextless([("mode", "backup_restore")]),
-                            "backup_restore")
+            yield PageMenuEntry(
+                title=_("Add job"),
+                icon_name="backup_job_new",
+                item=make_simple_link(html.makeuri_contextless([("mode", "edit_backup_job")])),
+                is_shortcut=True,
+                is_suggested=True,
+            )
 
     def _may_edit_config(self):
         return True
@@ -643,13 +693,12 @@ class PageEditBackupJob:
     def title(self):
         return self._title
 
-    def buttons(self):
-        html.context_button(_("Back"), html.makeuri_contextless([("mode", "backup")]), "back")
+    def page_menu(self, breadcrumb: Breadcrumb) -> PageMenu:
+        return make_simple_form_page_menu(breadcrumb, form_name="edit_job", button_name="save")
 
     def vs_backup_schedule(self):
         return Alternative(
             title=_("Schedule"),
-            style="dropdown",
             elements=[
                 FixedValue(
                     None,
@@ -724,7 +773,6 @@ class PageEditBackupJob:
                                     "created by the backup are encrypted using the specified key "
                                     "during backup. You will need the private key and the "
                                     "passphrase to decrypt the backup."),
-                             style="dropdown",
                              elements=[
                                  FixedValue(
                                      None,
@@ -795,7 +843,6 @@ class PageEditBackupJob:
         vs.set_focus("edit_job")
         forms.end()
 
-        html.button("save", _("Save"))
         html.hidden_fields()
         html.end_form()
 
@@ -815,8 +862,8 @@ class PageAbstractBackupJobState:
             raise Exception("incorrect job state: no backup entity")
         return _("Job state: %s") % self._job.title()
 
-    def buttons(self):
-        html.context_button(_("Back"), html.makeuri_contextless([("mode", "backup")]), "back")
+    def page_menu(self, breadcrumb: Breadcrumb) -> PageMenu:
+        return PageMenu(dropdowns=[], breadcrumb=breadcrumb)
 
     def page(self):
         html.open_div(id_="job_details")
@@ -1038,12 +1085,33 @@ class PageBackupTargets:
     def jobs(self):
         raise NotImplementedError()
 
-    def buttons(self):
-        html.context_button(_("Back"), html.makeuri_contextless([("mode", "backup")]), "back")
-        if self._may_edit_config():
-            html.context_button(_("New backup target"),
-                                html.makeuri_contextless([("mode", "edit_backup_target")]),
-                                "backup_target_edit")
+    def page_menu(self, breadcrumb: Breadcrumb) -> PageMenu:
+        if not self._may_edit_config():
+            return PageMenu(dropdowns=[], breadcrumb=breadcrumb)
+        return PageMenu(
+            dropdowns=[
+                PageMenuDropdown(
+                    name="targets",
+                    title=_("Targets"),
+                    topics=[
+                        PageMenuTopic(
+                            title=_("Add target"),
+                            entries=[
+                                PageMenuEntry(
+                                    title=_("Add target"),
+                                    icon_name="new",
+                                    item=make_simple_link(
+                                        html.makeuri_contextless([("mode", "edit_backup_target")])),
+                                    is_shortcut=True,
+                                    is_suggested=True,
+                                ),
+                            ],
+                        ),
+                    ],
+                ),
+            ],
+            breadcrumb=breadcrumb,
+        )
 
     def action(self):
         if html.transaction_valid():
@@ -1110,9 +1178,8 @@ class PageEditBackupTarget:
     def title(self):
         return self._title
 
-    def buttons(self):
-        html.context_button(_("Back"), html.makeuri_contextless([("mode", "backup_targets")]),
-                            "back")
+    def page_menu(self, breadcrumb: Breadcrumb) -> PageMenu:
+        return make_simple_form_page_menu(breadcrumb, form_name="edit_target", button_name="save")
 
     def vs_backup_target(self):
         if self._new:
@@ -1192,7 +1259,6 @@ class PageEditBackupTarget:
         vs.set_focus("edit_target")
         forms.end()
 
-        html.button("save", _("Save"))
         html.hidden_fields()
         html.end_form()
 
@@ -1203,7 +1269,7 @@ class SystemBackupTargetsReadOnly(Targets):
 
     # Only show the list on CMA devices
     def show_list(self, title=None, editable=True):
-        if is_cma():
+        if cmk_version.is_cma():
             super(SystemBackupTargetsReadOnly, self).show_list(title, editable)
 
 
@@ -1298,7 +1364,7 @@ class BackupTargetLocal(ABCBackupTargetType):
         if not is_canonical(value):
             raise MKUserError(varprefix, _("You have to provide a canonical path."))
 
-        if is_cma() and not value.startswith("/mnt/"):
+        if cmk_version.is_cma() and not value.startswith("/mnt/"):
             raise MKUserError(
                 varprefix,
                 _("You can only use mountpoints below the <tt>/mnt</tt> "
@@ -1317,7 +1383,7 @@ class BackupTargetLocal(ABCBackupTargetType):
                 pass
             os.unlink(test_file_path)
         except IOError:
-            if is_cma():
+            if cmk_version.is_cma():
                 raise MKUserError(
                     varprefix,
                     _("Failed to write to the configured directory. The target directory needs "
@@ -1406,9 +1472,6 @@ class PageBackupKeyManagement(key_mgmt.PageKeyManagement):
     def page(self):
         show_key_download_warning(self.keys)
         super(PageBackupKeyManagement, self).page()
-
-    def _back_button(self):
-        html.context_button(_("Back"), html.makeuri_contextless([("mode", "backup")]), "back")
 
     def _key_in_use(self, key_id, key):
         for job in self.jobs().objects.values():
@@ -1565,16 +1628,41 @@ class PageBackupRestore:
     def targets(self):
         raise NotImplementedError()
 
-    def buttons(self):
-        html.context_button(_("Back"), html.makeuri_contextless([("mode", "backup")]), "back")
-        if self._restore_is_running():
-            html.context_button(_("Stop"), html.makeactionuri([("_action", "stop")]),
-                                "backup_restore_stop")
-
-        elif self._restore_was_started():
-            html.context_button(_("Complete the restore"),
-                                html.makeactionuri([("_action", "complete")]),
-                                "backup_restore_complete")
+    def page_menu(self, breadcrumb: Breadcrumb) -> PageMenu:
+        return PageMenu(
+            dropdowns=[
+                PageMenuDropdown(
+                    name="restore",
+                    title=_("Restore"),
+                    topics=[
+                        PageMenuTopic(
+                            title=_("Restore job"),
+                            entries=[
+                                PageMenuEntry(
+                                    title=_("Stop"),
+                                    icon_name="backup_restore_stop",
+                                    item=make_simple_link(html.makeactionuri([("_action", "stop")
+                                                                             ])),
+                                    is_shortcut=True,
+                                    is_suggested=True,
+                                    is_enabled=self._restore_is_running(),
+                                ),
+                                PageMenuEntry(
+                                    title=_("Complete the restore"),
+                                    icon_name="backup_restore_complete",
+                                    item=make_simple_link(
+                                        html.makeactionuri([("_action", "complete")])),
+                                    is_shortcut=True,
+                                    is_suggested=True,
+                                    is_enabled=self._restore_was_started(),
+                                ),
+                            ],
+                        ),
+                    ],
+                ),
+            ],
+            breadcrumb=breadcrumb,
+        )
 
     def action(self):
         action = html.request.var("_action")
@@ -1668,14 +1756,11 @@ class PageBackupRestore:
             except MKUserError as e:
                 html.add_user_error(e.varname, e)
 
-        # Special handling for Check_MK / CMA differences
+        # Special handling for Checkmk / CMA differences
         if is_site():
             title = _("Insert passphrase")
             breadcrumb = make_simple_page_breadcrumb(mega_menu_registry.menu_setup(), title)
-            html.header(title, breadcrumb)
-            html.begin_context_buttons()
-            html.context_button(_("Back"), html.makeuri([("mode", "backup_restore")]), "back")
-            html.end_context_buttons()
+            html.header(title, breadcrumb, PageMenu(dropdowns=[], breadcrumb=breadcrumb))
 
         html.show_user_errors()
         html.p(

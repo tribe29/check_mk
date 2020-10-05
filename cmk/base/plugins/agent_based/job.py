@@ -15,16 +15,16 @@ from typing import (
     Tuple,
     Union,
 )
-from .agent_based_api.v0 import (
+from .agent_based_api.v1 import (
     Metric,
     register,
     render,
     Result,
     Service,
-    state,
+    State as state,
     type_defs,
 )
-from .agent_based_api.v0.clusterize import aggregate_node_details
+from .agent_based_api.v1.clusterize import aggregate_node_details
 
 # <<<job>>>
 # ==> asd ASD <==
@@ -261,18 +261,15 @@ def cluster_check_job(
     best_outcome = params.get("outcome_on_cluster") == "best"
 
     for node, node_section in section.items():
-        node_result = aggregate_node_details(
+        node_state, node_text = aggregate_node_details(
             node,
             check_job(item, params, node_section),
         )
-        if not node_result:
+        if not node_text:
             continue
 
-        states.append(node_result.state)
-        if best_outcome:
-            yield Result(state=state.OK, details=node_result.details)
-        else:
-            yield node_result
+        states.append(node_state)
+        yield Result(state=state.OK if best_outcome else node_state, notice=node_text)
 
     if states:
         summary = []

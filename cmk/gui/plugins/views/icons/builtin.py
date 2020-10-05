@@ -195,7 +195,7 @@ class RescheduleIcon(Icon):
                 if row[what + '_check_command'].startswith('check_mk-'):
                     servicedesc = 'Check_MK'
                     icon = 'reload_cmk'
-                    txt = _('Reschedule \'Check_MK\' service')
+                    txt = _('Reschedule \'Checkmk\' service')
 
             url = 'onclick:cmk.views.reschedule_check(this, %s, %s, %s, %s);' % \
                 (json.dumps(row["site"]), json.dumps(row["host_name"]), json.dumps(servicedesc), json.dumps(wait_svc))
@@ -361,7 +361,7 @@ class PerfgraphIcon(Icon):
     def _pnp_icon(self, row, what):
         url = self._graph_icon_link(row, what)
 
-        # Don't show the icon with Check_MK graphing. The hover makes no sense and there is no
+        # Don't show the icon with Checkmk graphing. The hover makes no sense and there is no
         # mobile view for graphs, so the graphs on the bottom of the host/service view are enough
         # for the moment.
         if html.is_mobile():

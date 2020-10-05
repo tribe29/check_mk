@@ -28,7 +28,6 @@ import cmk.gui.weblib as weblib
 import cmk.gui.forms as forms
 import cmk.gui.inventory as inventory
 import cmk.gui.visuals as visuals
-from cmk.gui.visuals import get_only_sites
 import cmk.gui.sites as sites
 import cmk.gui.pagetypes as pagetypes
 import cmk.gui.i18n
@@ -42,6 +41,7 @@ from cmk.gui.page_menu import (
     PageMenuTopic,
     PageMenuEntry,
     PageMenuPopup,
+    PageMenuSidePopup,
     make_display_options_dropdown,
     make_simple_link,
     make_checkbox_selection_topic,
@@ -86,7 +86,6 @@ from cmk.gui.plugins.visuals.utils import (
     VisualInfo,
     visual_type_registry,
     VisualType,
-    filter_registry,
     Filter,
 )
 from cmk.gui.plugins.views.icons.utils import (
@@ -592,7 +591,7 @@ class GUIViewRenderer(ABCViewRenderer):
         layout = self.view.layout
 
         # Display the filter form on page rendering in some cases
-        if view_spec.get("mustsearch") and not html.request.var("filled_in"):
+        if self._should_show_filter_form(view_spec):
             html.final_javascript("cmk.page_menu.open_popup('popup_filters');")
 
         # Actions
@@ -693,6 +692,29 @@ class GUIViewRenderer(ABCViewRenderer):
 
         if display_options.enabled(display_options.H):
             html.body_end()
+
+    def _should_show_filter_form(self, view_spec: ViewSpec) -> bool:
+        """Whether or not the filter form should be displayed on page load
+
+        a) In case the user toggled the popup in the frontend, always enforce that property
+
+        b) Show in case the view is a "mustsearch" view (User needs to submit the filter form before
+        data is shown).
+
+        c) Show after submitting the filter form. The user probably wants to update the filters
+        after first filtering.
+        """
+        show_form = html.request.get_integer_input("_show_filter_form")
+        if show_form is not None:
+            return show_form == 1
+
+        if view_spec.get("mustsearch"):
+            return True
+
+        if html.request.get_ascii_input("filled_in") == "filter":
+            return True
+
+        return False
 
     def _page_menu(self, breadcrumb: Breadcrumb, rows: Rows,
                    show_filters: List[Filter]) -> PageMenu:
@@ -829,7 +851,7 @@ class GUIViewRenderer(ABCViewRenderer):
         yield PageMenuEntry(
             title=_("Filter view"),
             icon_name="filters_set" if is_filter_set else "filters",
-            item=PageMenuPopup(self._render_filter_form(show_filters), css_classes=["side_popup"]),
+            item=PageMenuSidePopup(self._render_filter_form(show_filters)),
             name="filters",
             is_shortcut=True,
         )
@@ -880,9 +902,7 @@ class GUIViewRenderer(ABCViewRenderer):
             return ""
 
         with html.plugged():
-            if display_options.enabled(display_options.F) and len(show_filters) > 0:
-                show_filter_form(self.view, show_filters)
-
+            show_filter_form(self.view, show_filters)
             return html.drain()
 
     def _render_painter_options_form(self) -> str:
@@ -916,55 +936,6 @@ class GUIViewRenderer(ABCViewRenderer):
         #menu.add_youtube_reference(title=_("Episode 3: Monitoring Windows"),
         #                           youtube_id="iz8S9TGGklQ")
         pass
-
-
-class ViewFilterList(visuals.VisualFilterList):
-    """Special form of the visual filter list to be used in the views"""
-    def filter_list_id(self, varprefix: str) -> str:
-        return "%spopup_filter_list" % varprefix
-
-    def _show_add_elements(self, varprefix: str) -> None:
-        filter_list_id = self.filter_list_id(varprefix)
-
-        html.open_div(id_=filter_list_id, class_="filter_list")
-        html.more_button(filter_list_id, 1)
-        for group in self._grouped_choices:
-            if not group.choices:
-                continue
-
-            group_id = "filter_group_" + "".join(group.title.split()).lower()
-
-            html.open_div(id_=group_id, class_="filter_group")
-            # Show / hide all entries of this group
-            html.a(group.title,
-                   href="",
-                   class_="filter_group_title",
-                   onclick="cmk.page_menu.toggle_filter_group_display(this.nextSibling)")
-
-            # Display all entries of this group
-            html.open_ul()
-            for choice in group.choices:
-                filter_name = choice[0]
-
-                # FIXME: register instances in filter_registry (CMK-5137)
-                filter_obj = filter_registry[filter_name]()  # type: ignore[call-arg]
-                html.open_li(class_="advanced" if filter_obj.is_advanced else "basic")
-
-                html.a(choice[1].title() or filter_name,
-                       href="javascript:void(0)",
-                       onclick="cmk.valuespecs.listofmultiple_add(%s, %s, %s, this);"
-                       "cmk.page_menu.add_filter_scroll_update()" %
-                       (json.dumps(varprefix), json.dumps(
-                           self._choice_page_name), json.dumps(self._page_request_vars)),
-                       id_="%s_add_%s" % (varprefix, filter_name))
-
-                html.close_li()
-            html.close_ul()
-
-            html.close_div()
-        html.close_div()
-        html.javascript('cmk.valuespecs.listofmultiple_init(%s);' % json.dumps(varprefix))
-        html.javascript("cmk.utils.add_simplebar_scrollbar(%s);" % json.dumps(filter_list_id))
 
 
 # Load all view plugins
@@ -1419,7 +1390,6 @@ def view_editor_column_spec(ident, title, ds_name):
                     elements=column_elements(join_painters, "join_painter"),
                 ),
             ],
-            style='dropdown',
             match=lambda x: 1 * (x is not None and x[1] is not None),
         )
 
@@ -1630,53 +1600,55 @@ def create_view_from_valuespec(old_view, view):
 
 
 def show_filter_form(view: View, show_filters: List[Filter]) -> None:
-    html.show_user_errors()
-
-    html.begin_form("filter")
-
-    vs_filters = ViewFilterList(info_list=view.datasource.infos)
-    varprefix = ""
-    filter_list_id = vs_filters.filter_list_id(varprefix)
-
-    _show_filter_form_buttons(filter_list_id)
-
-    html.open_div(class_="side_popup_content")
-    html.open_table(class_=["filterform"], cellpadding="0", cellspacing="0", border="0")
-    html.open_tr()
-    html.open_td()
-
-    vs_filters.render_input(varprefix, {f.ident: {} for f in show_filters if f.available()})
-
-    html.close_td()
-    html.close_tr()
-    html.close_table()
-    html.close_div()
-
-    html.hidden_fields()
-    html.end_form()
+    visuals.show_filter_form(info_list=view.datasource.infos,
+                             mandatory_filters=[],
+                             context={f.ident: {} for f in show_filters if f.available()},
+                             page_name=view.name,
+                             reset_ajax_page="ajax_initial_view_filters")
 
 
-def _show_filter_form_buttons(filter_list_id: str) -> None:
-    html.open_div(class_="side_popup_controls")
+class ABCAjaxInitialFilters(AjaxPage):
+    @abc.abstractmethod
+    def _get_context(self, page_name: str) -> Dict:
+        raise NotImplementedError()
 
-    html.open_a(href="javascript:void(0);",
-                onclick="cmk.page_menu.toggle_popup_filter_list(this, %s)" %
-                json.dumps(filter_list_id),
-                class_="add")
-    html.icon(title=_("Add search filters"), icon="add")
-    html.div(html.render_text("Add filter"), class_="description")
-    html.close_a()
+    def page(self) -> Dict[str, str]:
+        request = self.webapi_request()
+        varprefix = request.get("varprefix", "")
+        page_name = request.get("page_name", "")
+        context = self._get_context(page_name)
+        page_request_vars = request.get("page_request_vars")
+        assert isinstance(page_request_vars, dict)
+        vs_filters = visuals.VisualFilterListWithAddPopup(info_list=page_request_vars["infos"],
+                                                          ignore=page_request_vars["ignore"])
+        with html.plugged():
+            vs_filters.render_input(varprefix, context)
+            return {"filters_html": html.drain()}
 
-    html.open_div(class_="update_buttons")
-    # TODO: This is currently broken. It is unclear to which state exactly to reset to
-    #html.jsbutton("reset",
-    #              _("Reset"),
-    #              cssclass="reset",
-    #              onclick="cmk.valuespecs.listofmultiple_reset('')")
-    html.button("apply", _("Apply filters"), cssclass="apply submit")
-    html.close_div()
 
-    html.close_div()
+@page_registry.register_page("ajax_initial_view_filters")
+class AjaxInitialViewFilters(ABCAjaxInitialFilters):
+    def _get_context(self, page_name: str) -> Dict:
+        # Obtain the visual filters and the view context
+        view_name = page_name
+        try:
+            view_spec = get_permitted_views()[view_name]
+        except KeyError:
+            raise MKUserError("view_name", _("The requested item %s does not exist") % view_name)
+
+        datasource = data_source_registry[view_spec["datasource"]]()
+        show_filters = visuals.filters_of_visual(view_spec,
+                                                 datasource.infos,
+                                                 link_filters=datasource.link_filters)
+        show_filters = visuals.visible_filters_of_visual(view_spec, show_filters)
+        view_context = view_spec.get("context", {})
+
+        # Return a visual filters dict filled with the view context values
+        return {
+            f.ident: view_context[f.ident] if f.ident in view_context else {}
+            for f in show_filters
+            if f.available()
+        }
 
 
 @cmk.gui.pages.register("view")
@@ -1694,7 +1666,8 @@ def page_view():
 
     view = View(view_name, view_spec, context)
     view.row_limit = get_limit()
-    view.only_sites = get_only_sites()
+    view.only_sites = visuals.get_only_sites_from_context(context)
+
     view.user_sorters = get_user_sorters()
     view.want_checkboxes = get_want_checkboxes()
 
@@ -2736,7 +2709,7 @@ def _should_show_command_form(datasource: ABCDataSource,
     what = datasource.infos[0]
     for command_class in command_registry.values():
         command = command_class()
-        if what in command.tables and config.user.may(command.permission().name):
+        if what in command.tables and config.user.may(command.permission.name):
             return True
 
     return False
@@ -2747,7 +2720,7 @@ def _get_command_groups(info_name: InfoName) -> Dict[Type[CommandGroup], List[Co
 
     for command_class in command_registry.values():
         command = command_class()
-        if info_name in command.tables and config.user.may(command.permission().name):
+        if info_name in command.tables and config.user.may(command.permission.name):
             # Some special commands can be shown on special views using this option.  It is
             # currently only used by custom commands, not shipped with Checkmk.
             if command.only_view and html.request.var('view_name') != command.only_view:
@@ -2786,7 +2759,7 @@ def core_command(what, row, row_nr, total_rows):
     # confirmation dialog.
     for cmd_class in command_registry.values():
         cmd = cmd_class()
-        if config.user.may(cmd.permission().name):
+        if config.user.may(cmd.permission.name):
             result = cmd.action(cmdtag, spec, row, row_nr, total_rows)
             if result:
                 executor = cmd.executor
@@ -3021,7 +2994,7 @@ def ajax_popup_action_menu():
                     url = 'javascript:void(0);'
                 html.open_a(href=url, target=target_frame, onclick=onclick)
 
-            html.icon('', icon_name)
+            html.icon(icon_name)
             if title:
                 html.write(title)
             else:

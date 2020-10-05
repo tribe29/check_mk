@@ -32,7 +32,9 @@ from typing import (
     Sequence,
     Set,
     Tuple,
+    TypedDict,
     Union,
+    Final,
 )
 
 from six import ensure_str
@@ -69,20 +71,24 @@ from cmk.utils.type_defs import (
     ContactgroupName,
     HostAddress,
     HostgroupName,
+    HostKey,
     HostName,
     Item,
     Labels,
     LabelSources,
     Ruleset,
-    RulesetName,
+    RulesetName,  # alias for str
     SectionName,
     ServicegroupName,
     ServiceName,
+    SourceType,
     TagGroups,
     TagList,
     Tags,
     TagValue,
     TimeperiodName,
+    OptionalConfigSerial,
+    LATEST_SERIAL,
 )
 
 from cmk.snmplib.type_defs import (  # noqa: F401 # pylint: disable=unused-import; these are required in the modules' namespace to load the configuration!
@@ -93,13 +99,13 @@ import cmk.base.autochecks as autochecks
 import cmk.base.check_api_utils as check_api_utils
 import cmk.base.check_utils
 import cmk.base.default_config as default_config
+from cmk.base.api.agent_based.checking_classes import CheckPlugin
 from cmk.base.api.agent_based.register.check_plugins_legacy import create_check_plugin_from_legacy
 from cmk.base.api.agent_based.register.section_plugins_legacy import (
     create_agent_section_plugin_from_legacy,
     create_snmp_section_plugin_from_legacy,
 )
 from cmk.base.api.agent_based.type_defs import (
-    CheckPlugin,
     Parameters,
     SectionPlugin,
     SNMPSectionPlugin,
@@ -117,8 +123,6 @@ host_service_levels = []
 AllHosts = List[str]
 ShadowHosts = Dict[str, Dict]
 AllClusters = Dict[str, List[HostName]]
-ExitSpecSection = Tuple[str, int]
-ExitSpec = Dict[str, Union[int, List[ExitSpecSection]]]
 AgentTargetVersion = Union[None, str, Tuple[str, str], Tuple[str, Dict[str, str]]]
 RRDConfig = Dict[str, Any]
 CheckContext = Dict[str, Any]
@@ -146,6 +150,22 @@ CheckInfo = Dict  # TODO: improve this type
 IPMICredentials = Dict[str, str]
 ManagementCredentials = Union[SNMPCredentials, IPMICredentials]
 SelectedRawSections = Dict[SectionName, SectionPlugin]
+
+
+class ExitSpec(TypedDict, total=False):
+    empty_output: int
+    connection: int
+    timeout: int
+    exception: int
+    wrong_version: int
+    missing_sections: int
+    specific_missing_sections: List[Tuple[str, int]]
+    restricted_address_mismatch: int
+
+
+class _NestedExitSpec(ExitSpec, total=False):
+    overall: ExitSpec
+    individual: Dict[str, ExitSpec]
 
 
 class TimespecificParamList(list):
@@ -243,13 +263,13 @@ def load(with_conf_d: bool = True,
 
     # Such validation only makes sense when all checks have been loaded
     if all_checks_loaded():
-        verify_non_invalid_variables(vars_before_config)
+        _validate_configuraton_variables(vars_before_config)
         _verify_no_deprecated_check_rulesets()
 
     _verify_no_deprecated_variables_used()
 
 
-def load_packed_config() -> None:
+def load_packed_config(serial: OptionalConfigSerial) -> None:
     """Load the configuration for the CMK helpers of CMC
 
     These files are written by PackedConfig().
@@ -259,7 +279,9 @@ def load_packed_config() -> None:
 
     The validations which are performed during load() also don't need to be performed.
     """
-    PackedConfig().load()
+    _initialize_config()
+    globals().update(PackedConfigStore(serial).read())
+    _perform_post_config_loading_actions()
 
 
 def _initialize_config() -> None:
@@ -271,6 +293,10 @@ def _perform_post_config_loading_actions() -> None:
     """These tasks must be performed after loading the Check_MK base configuration"""
     # First cleanup things (needed for e.g. reloading the config)
     _config_cache.clear_all()
+
+    global_dict = globals()
+    _collect_discovery_parameter_rulesets_from_globals(global_dict)
+    _transform_plugin_names_from_160_to_170(global_dict)
 
     get_config_cache().initialize()
 
@@ -399,9 +425,6 @@ def _load_config(with_conf_d: bool, exclude_parents_mk: bool) -> None:
     for helper_var in helper_vars:
         del global_dict[helper_var]
 
-    _collect_discovery_parameter_rulesets_from_globals(global_dict)
-    _transform_plugin_names_from_160_to_170(global_dict)
-
     # Revert specialised SetFolderPath classes back to normal, because it improves
     # the lookup performance and the helper_vars are no longer available anyway..
     all_hosts = list(all_hosts)
@@ -443,7 +466,10 @@ def _transform_plugin_names_from_160_to_170(global_dict: Dict[str, Any]) -> None
 def _collect_discovery_parameter_rulesets_from_globals(global_dict: Dict[str, Any],) -> None:
     # list of discovery ruleset names which are used in migrated AND in legacy code; can be removed
     # once we have no such cases any more
-    partially_migrated = ["diskstat_inventory"]
+    partially_migrated = [
+        "diskstat_inventory",
+        "inventory_ipmi_rules",
+    ]
     for ruleset_name in agent_based_register.iter_all_discovery_rulesets():
         var_name = str(ruleset_name)
         if var_name in global_dict:
@@ -486,22 +512,35 @@ def _verify_non_duplicate_hosts() -> None:
         sys.exit(3)
 
 
-def verify_non_invalid_variables(vars_before_config: Set[str]) -> None:
-    # Check for invalid configuration variables
-    vars_after_config = all_nonfunction_vars()
+def _validate_configuraton_variables(vars_before_config: Set[str]) -> None:
+    """Check for invalid and deprecated configuration variables"""
     ignored_variables = {
         'vars_before_config', 'parts', 'seen_hostnames', 'taggedhost', 'hostname',
         'service_service_levels', 'host_service_levels'
     }
+    deprecated_variables = {
+        # variable name                                # warning introduced *after* version
+        'oracle_tablespaces_check_default_increment',  # 1.6
+        'logwatch_dir',  # 1.6
+        'logwatch_max_filesize',  # 1.6
+        'logwatch_service_output',  # 1.6
+        'logwatch_spool_dir',  # 1.6
+    }
 
-    found_invalid = 0
-    for name in vars_after_config:
-        if name not in ignored_variables and name not in vars_before_config:
-            console.error("Invalid configuration variable '%s'\n", name)
-            found_invalid += 1
+    unhandled_variables = all_nonfunction_vars() - vars_before_config - ignored_variables
+    deprecated_found = unhandled_variables.intersection(deprecated_variables)
+    invalid_found = unhandled_variables - deprecated_variables
 
-    if found_invalid:
-        console.error("--> Found %d invalid variables\n" % found_invalid)
+    if deprecated_found:
+        for name in sorted(deprecated_found):
+            console.error("Deprecated configuration variable %r\n", name)
+        console.error("--> Found %d deprecated variables\n" % len(deprecated_found))
+        console.error("These variables will have no effect at best. Consider removing them.\n")
+
+    if invalid_found:
+        for name in sorted(invalid_found):
+            console.error("Invalid configuration variable %r\n", name)
+        console.error("--> Found %d invalid variables\n" % len(invalid_found))
         console.error("If you use own helper variables, please prefix them with _.\n")
         sys.exit(1)
 
@@ -512,7 +551,7 @@ def _verify_no_deprecated_variables_used() -> None:
         sys.exit(1)
 
     # Legacy checks have never been supported by CMC, were not configurable via WATO
-    # and have been removed with Check_MK 1.6
+    # and have been removed with Checkmk 1.6
     if legacy_checks:
         console.error(
             "Check_MK does not support the configuration variable \"legacy_checks\" anymore. "
@@ -520,7 +559,7 @@ def _verify_no_deprecated_variables_used() -> None:
         sys.exit(1)
 
     # "checks" declarations were never possible via WATO. They can be configured using
-    # "static_checks" using the GUI. "checks" has been removed with Check_MK 1.6.
+    # "static_checks" using the GUI. "checks" has been removed with Checkmk 1.6.
     if checks:
         console.error(
             "Check_MK does not support the configuration variable \"checks\" anymore. "
@@ -530,10 +569,9 @@ def _verify_no_deprecated_variables_used() -> None:
 
 
 def _verify_no_deprecated_check_rulesets() -> None:
-    deprecated_rulesets = [
-        ("services", "inventory_services"),
-        ("logwatch", "logwatch_patterns"),
-    ]
+    # this used to do something until the migration of logwatch.
+    # TODO: decide wether we might still need this.
+    deprecated_rulesets: List[Tuple[str, str]] = []
     for check_plugin_name, varname in deprecated_rulesets:
         check_context = get_check_context(check_plugin_name)
         if check_context.get(varname):
@@ -550,7 +588,12 @@ def all_nonfunction_vars() -> Set[str]:
     }
 
 
-class PackedConfig:
+def save_packed_config(serial: OptionalConfigSerial, config_cache: "ConfigCache") -> None:
+    """Create and store a precompiled configuration for Checkmk helper processes"""
+    PackedConfigStore(serial).write(PackedConfigGenerator(config_cache).generate())
+
+
+class PackedConfigGenerator:
     """The precompiled host checks and the CMC Check_MK helpers use a
     "precompiled" part of the Check_MK configuration during runtime.
 
@@ -562,8 +605,8 @@ class PackedConfig:
        need the options needed for checking
     """
 
-    # These variables are part of the Check_MK configuration, but are not needed
-    # by the Check_MK keepalive mode, so exclude them from the packed config
+    # These variables are part of the Checkmk configuration, but are not needed
+    # by the Checkmk keepalive mode, so exclude them from the packed config
     _skipped_config_variable_names = [
         "define_contactgroups",
         "define_hostgroups",
@@ -578,23 +621,17 @@ class PackedConfig:
         "extra_nagios_conf",
     ]
 
-    def __init__(self) -> None:
-        super(PackedConfig, self).__init__()
-        self._path = os.path.join(cmk.utils.paths.var_dir, "base", "precompiled_check_config.mk")
+    def __init__(self, config_cache: "ConfigCache") -> None:
+        self._config_cache = config_cache
 
-    def save(self) -> None:
-        self._write(self._pack())
-
-    def _pack(self) -> str:
+    def generate(self) -> str:
         helper_config = ("#!/usr/bin/env python\n"
                          "# encoding: utf-8\n"
-                         "# Created by Check_MK. Dump of the currently active configuration\n\n")
-
-        config_cache = get_config_cache()
+                         "# Created by Checkmk. Dump of the currently active configuration\n\n")
 
         # These functions purpose is to filter out hosts which are monitored on different sites
-        active_hosts = config_cache.all_active_hosts()
-        active_clusters = config_cache.all_active_clusters()
+        active_hosts = self._config_cache.all_active_hosts()
+        active_clusters = self._config_cache.all_active_clusters()
 
         def filter_all_hosts(all_hosts_orig: AllHosts) -> List[HostName]:
             all_hosts_red = []
@@ -631,7 +668,7 @@ class PackedConfig:
         }
 
         #
-        # Add modified Check_MK base settings
+        # Add modified Checkmk base settings
         #
 
         variable_defaults = get_default_config()
@@ -657,7 +694,21 @@ class PackedConfig:
             helper_config += "\n%s = %r\n" % (varname, val)
 
         #
-        # Add modified check specific Check_MK base settings
+        # Add discovery rules
+        #
+
+        for ruleset_name in agent_based_register.iter_all_discovery_rulesets():
+            value = agent_based_register.get_discovery_ruleset(ruleset_name)
+            if not value:
+                continue
+
+            if not self._packable(str(ruleset_name), value):
+                continue
+
+            helper_config += "\n%s = %r\n" % (ruleset_name, value)
+
+        #
+        # Add modified check specific Checkmk base settings
         #
 
         check_variable_defaults = _get_check_variable_defaults()
@@ -685,22 +736,41 @@ class PackedConfig:
         except SyntaxError:
             return False
 
-    def _write(self, helper_config: str) -> None:
-        store.makedirs(os.path.dirname(self._path))
 
-        store.save_file(self._path + ".orig", helper_config + "\n")
+class PackedConfigStore:
+    """Caring about persistence of the packed configuration"""
+    def __init__(self, serial: OptionalConfigSerial) -> None:
+        base_path: Final[Path] = make_helper_config_path(serial)
+        self._compiled_path: Final[Path] = base_path / "precompiled_check_config.mk"
+        self._source_path: Final[Path] = base_path / "precompiled_check_config.mk.orig"
+
+    def write(self, helper_config: str) -> None:
+        self._source_path.parent.mkdir(parents=True, exist_ok=True)
+        store.save_file(self._source_path, helper_config + "\n")
 
         code = compile(helper_config, '<string>', 'exec')
-        with open(self._path + ".compiled", "wb") as compiled_file:
+        tmp_path = self._compiled_path.parent / (self._compiled_path.name + ".compiled")
+        with tmp_path.open("wb") as compiled_file:
             marshal.dump(code, compiled_file)
+        tmp_path.rename(self._compiled_path)
 
-        os.rename(self._path + ".compiled", self._path)
+    def read(self) -> Dict[str, Any]:
+        with self._compiled_path.open("rb") as f:
+            namespace: Dict[str, Any] = {}
+            exec(marshal.load(f), globals(), namespace)
+            return namespace
 
-    def load(self) -> None:
-        _initialize_config()
-        with open(self._path, "rb") as f:
-            exec(marshal.load(f), globals())
-        _perform_post_config_loading_actions()
+
+def make_helper_config_path(serial: OptionalConfigSerial) -> Path:
+    return cmk.utils.paths.core_helper_config_dir / serial
+
+
+def make_core_autochecks_dir(serial: OptionalConfigSerial) -> Path:
+    return make_helper_config_path(serial) / "autochecks"
+
+
+def make_core_discovered_host_labels_dir(serial: OptionalConfigSerial) -> Path:
+    return make_helper_config_path(serial) / "discovered_host_labels"
 
 
 @contextlib.contextmanager
@@ -719,8 +789,9 @@ def set_use_core_config(use_core_config: bool) -> Iterator[None]:
     _orig_discovered_host_labels_dir = cmk.utils.paths.discovered_host_labels_dir
     try:
         if use_core_config:
-            cmk.utils.paths.autochecks_dir = cmk.utils.paths.core_autochecks_dir
-            cmk.utils.paths.discovered_host_labels_dir = cmk.utils.paths.core_discovered_host_labels_dir
+            cmk.utils.paths.autochecks_dir = str(make_core_autochecks_dir(LATEST_SERIAL))
+            cmk.utils.paths.discovered_host_labels_dir = make_core_discovered_host_labels_dir(
+                LATEST_SERIAL)
         else:
             cmk.utils.paths.autochecks_dir = cmk.utils.paths.base_autochecks_dir
             cmk.utils.paths.discovered_host_labels_dir = cmk.utils.paths.base_discovered_host_labels_dir
@@ -1079,7 +1150,7 @@ def service_ignored(
     if check_plugin_name is not None:
         check_plugin_name_str = str(check_plugin_name)
 
-        if str(check_plugin_name) in ignored_checktypes:
+        if check_plugin_name_str in ignored_checktypes:
             return True
 
         if _checktype_ignored_for_host(host_name, check_plugin_name_str):
@@ -1390,7 +1461,7 @@ def discovery_max_cachefile_age(use_caches: bool) -> int:
 #   '----------------------------------------------------------------------'
 
 
-def load_all_checks(get_check_api_context: GetCheckApiContext) -> None:
+def load_all_agent_based_plugins(get_check_api_context: GetCheckApiContext,) -> None:
     """Load all checks and includes"""
     global _all_checks_loaded
 
@@ -1399,8 +1470,23 @@ def load_all_checks(get_check_api_context: GetCheckApiContext) -> None:
     agent_based_register.load_all_plugins()
 
     # LEGACY CHECK PLUGINS
-    filelist = get_plugin_paths(str(cmk.utils.paths.local_checks_dir), cmk.utils.paths.checks_dir)
+    filelist = get_plugin_paths(
+        str(cmk.utils.paths.local_checks_dir),
+        cmk.utils.paths.checks_dir,
+    )
     load_checks(get_check_api_context, filelist)
+
+    # LEGACY INVENTORY PLUGINS
+    # unfortunately, inventory_plugins will import cmk.base.config,
+    # so we have to use a local import for now.
+    # We could do further refactoring to resolve this, but the time would probably
+    # be spent better migrating the legacy inventory plugins to the new API...
+    import cmk.base.inventory_plugins as inventory_plugins  # pylint: disable=import-outside-toplevel
+    from cmk.base.inventory import get_inventory_context  # pylint: disable=import-outside-toplevel
+    inventory_plugins.load_legacy_inventory_plugins(
+        get_check_api_context,
+        get_inventory_context,
+    )
 
     _all_checks_loaded = True
 
@@ -1446,6 +1532,7 @@ def load_checks(get_check_api_context: GetCheckApiContext, filelist: List[str]) 
 
     loaded_files: Set[str] = set()
 
+    did_compile = False
     for f in filelist:
         if f[0] == "." or f[-1] == "~":
             continue  # ignore editor backup / temp files
@@ -1462,9 +1549,9 @@ def load_checks(get_check_api_context: GetCheckApiContext, filelist: List[str]) 
             known_checks = set(check_info)
             known_active_checks = set(active_check_info)
 
-            load_check_includes(f, check_context)
+            did_compile |= load_check_includes(f, check_context)
+            did_compile |= load_precompiled_plugin(f, check_context)
 
-            load_precompiled_plugin(f, check_context)
             loaded_files.add(file_name)
 
         except MKTerminate:
@@ -1515,7 +1602,7 @@ def load_checks(get_check_api_context: GetCheckApiContext, filelist: List[str]) 
             variables=new_check_vars,
             # Keep track of which variable needs to be set to which context
             context_idents=list(new_checks) + list(new_active_checks),
-            # Do not allow checks to override Check_MK builtin global variables. Silently
+            # Do not allow checks to override Checkmk builtin global variables. Silently
             # skip them here. The variables will only be locally available to the checks.
             skip_names=cmk_global_vars,
         )
@@ -1531,8 +1618,7 @@ def load_checks(get_check_api_context: GetCheckApiContext, filelist: List[str]) 
     # Now convert check_info to new format.
     convert_check_info()
     _extract_agent_and_snmp_sections()
-    _extract_check_plugins()
-    verify_checkgroup_members()
+    _extract_check_plugins(validate_creation_kwargs=did_compile)
     initialize_check_type_caches()
 
 
@@ -1548,7 +1634,7 @@ def any_check_loaded() -> bool:
 
 # Constructs a new check context dictionary. It contains the whole check API.
 def new_check_context(get_check_api_context: GetCheckApiContext) -> CheckContext:
-    # Add the data structures where the checks register with Check_MK
+    # Add the data structures where the checks register with Checkmk
     context = {
         "check_info": check_info,
         "check_includes": check_includes,
@@ -1570,11 +1656,13 @@ def new_check_context(get_check_api_context: GetCheckApiContext) -> CheckContext
 # Load the definitions of the required include files for this check
 # Working with imports when specifying the includes would be much cleaner,
 # sure. But we need to deal with the current check API.
-def load_check_includes(check_file_path: str, check_context: CheckContext) -> None:
+def load_check_includes(check_file_path: str, check_context: CheckContext) -> bool:
+    """Returns `True` if something has been compiled, else `False`."""
+    did_compile = False
     for include_file_name in cached_includes_of_plugin(check_file_path):
         include_file_path = check_include_file_path(include_file_name)
         try:
-            load_precompiled_plugin(include_file_path, check_context)
+            did_compile |= load_precompiled_plugin(include_file_path, check_context)
         except MKTerminate:
             raise
 
@@ -1583,6 +1671,8 @@ def load_check_includes(check_file_path: str, check_context: CheckContext) -> No
             if cmk.utils.debug.enabled():
                 raise
             continue
+
+    return did_compile
 
 
 def check_include_file_path(include_file_name: str) -> str:
@@ -1701,55 +1791,66 @@ def _plugin_pathnames_in_directory(path: str) -> List[str]:
     return []
 
 
+class _PYCHeader():
+    """ A pyc header according to https://www.python.org/dev/peps/pep-0552/"""
+    SIZE = 16
+
+    def __init__(self, magic: bytes, hash_: int, origin_mtime: int, f_size: int) -> None:
+        self.magic = magic
+        self.hash = hash_
+        self.origin_mtime = origin_mtime
+        self.f_size = f_size
+
+    @classmethod
+    def from_file(cls, path: str) -> "_PYCHeader":
+        with open(path, "rb") as handle:
+            raw_bytes = handle.read(cls.SIZE)
+        return cls(*struct.unpack("4s3I", raw_bytes))
+
+
 # TODO: Check if this totally non-portable Kung Fu still works with Python 3!
-def load_precompiled_plugin(path: str, check_context: CheckContext) -> None:
+def load_precompiled_plugin(path: str, check_context: CheckContext) -> bool:
     """Loads the given check or check include plugin into the given
     check context.
 
     To improve loading speed the files are not read directly. The files are
     python byte-code compiled before in case it has not been done before. In
     case there is already a compiled file that is newer than the current one,
-    then the precompiled file is loaded."""
+    then the precompiled file is loaded.
+
+    Returns `True` if something has been compiled, else `False`.
+    """
 
     # https://docs.python.org/3/library/py_compile.html
-    # https://www.python.org/dev/peps/pep-0552/
     # HACK:
-    header_size = 16
     precompiled_path = _precompiled_plugin_path(path)
 
-    if not _is_plugin_precompiled(path, precompiled_path):
+    do_compile = not _is_plugin_precompiled(path, precompiled_path)
+    if do_compile:
         console.vverbose("Precompile %s to %s\n" % (path, precompiled_path))
         store.makedirs(os.path.dirname(precompiled_path))
         py_compile.compile(path, precompiled_path, doraise=True)
 
-    exec(marshal.loads(open(precompiled_path, "rb").read()[header_size:]), check_context)
+    exec(marshal.loads(open(precompiled_path, "rb").read()[_PYCHeader.SIZE:]), check_context)
+
+    return do_compile
 
 
 def _is_plugin_precompiled(path: str, precompiled_path: str) -> bool:
-    if not os.path.exists(precompiled_path):
+    # Check precompiled file header
+    try:
+        header = _PYCHeader.from_file(precompiled_path)
+    except (FileNotFoundError, struct.error):
         return False
 
-    # Check precompiled file header
-    f = open(precompiled_path, "rb")
-
-    file_magic = f.read(4)
-    if file_magic != _MAGIC_NUMBER:
+    if header.magic != _MAGIC_NUMBER:
         return False
 
     # Skip the hash and assure that the timestamp format is used, i.e. the hash is 0.
     # For further details see: https://www.python.org/dev/peps/pep-0552/#id15
-    file_hash = int(struct.unpack("I", f.read(4))[0])
-    assert file_hash == 0
+    assert header.hash == 0
 
-    try:
-        origin_file_mtime = struct.unpack("I", f.read(4))[0]
-    except struct.error:
-        return False
-
-    if int(os.stat(path).st_mtime) != origin_file_mtime:
-        return False
-
-    return True
+    return int(os.stat(path).st_mtime) == header.origin_mtime
 
 
 def _precompiled_plugin_path(path: str) -> str:
@@ -1948,22 +2049,16 @@ def _extract_agent_and_snmp_sections() -> None:
                         section_name,
                         check_info_dict,
                     ))
-        except (NotImplementedError, KeyError, AssertionError, ValueError):
-            # TODO (mo): Clean this up once we have a solution for the plugins currently
-            # failing here. For now we need too keep it commented out, because we can't
-            # test otherwise.
-            #if cmk.utils.debug.enabled():
-            #    raise MKGeneralException(exc)
-            # TODO (mo): Prevent any stdio output here. It will kill the process immediately.
-            #     This piece of code is a part of microcore subrpocess "cmk --checker'
-            #     Microcore expected in stdout some correctly formatted data. If no, then process will
-            #     be killed on sight. Sdterr is ok.
-            #console.warning(AUTO_MIGRATION_ERR_MSG % ("section", check_plugin_name))
-            #console.vverbose(AUTO_MIGRATION_ERR_MSG % ("section", check_plugin_name))
-            pass
+        except (NotImplementedError, KeyError, AssertionError, ValueError) as exc:
+            if cmk.utils.debug.enabled():
+                raise MKGeneralException(exc)
+            console.error(AUTO_MIGRATION_ERR_MSG % ("section", check_plugin_name))
 
 
-def _extract_check_plugins() -> None:
+def _extract_check_plugins(
+    *,
+    validate_creation_kwargs: bool,
+) -> None:
     """Here comes the next layer of converting-to-"new"-api.
 
     For the new check-API in cmk/base/api/agent_based, we use the accumulated information
@@ -1981,52 +2076,12 @@ def _extract_check_plugins() -> None:
                     check_info.get(check_plugin_name.split('.')[0], {}).get('extra_sections', []),
                     factory_settings,
                     get_check_context,
+                    validate_creation_kwargs=validate_creation_kwargs,
                 ))
-        except (NotImplementedError, KeyError, AssertionError, ValueError):
-            # TODO (mo): Clean this up once we have a solution for the plugins currently
-            # failing here. For now we need too keep it commented out, because we can't
-            # test otherwise.
-            #if cmk.utils.debug.enabled():
-            #    raise MKGeneralException(exc)
-            #console.warning(AUTO_MIGRATION_ERR_MSG % ("check plugin", check_plugin_name))
-            pass
-
-
-# This function validates the checks which are members of checkgroups to have either
-# all or none an item. Mixed checkgroups lead to strange exceptions when processing
-# the check parameters. So it is much better to catch these errors in a central place
-# with a clear error message.
-def verify_checkgroup_members() -> None:
-    groups = checks_by_checkgroup()
-
-    for group_name, check_entries in groups.items():
-        with_item, without_item = [], []
-        for check_plugin_name, check_info_entry in check_entries:
-            # Trying to detect whether or not the check has an item. But this mechanism is not
-            # 100% reliable since Check_MK appends an item to the service_description when "%s"
-            # is not in the checks service_description template.
-            # Maybe we need to define a new rule which enforces the developer to use the %s in
-            # the service_description. At least for grouped checks.
-            if "%s" in check_info_entry["service_description"]:
-                with_item.append(check_plugin_name)
-            else:
-                without_item.append(check_plugin_name)
-
-        if with_item and without_item:
-            raise MKGeneralException(
-                "Checkgroup %s has checks with and without item! At least one of "
-                "the checks in this group needs to be changed (With item: %s, "
-                "Without item: %s)" % (group_name, ", ".join(with_item), ", ".join(without_item)))
-
-
-def checks_by_checkgroup() -> Dict[RulesetName, List[Tuple[CheckPluginNameStr, CheckInfo]]]:
-    groups: Dict[RulesetName, List[Tuple[CheckPluginNameStr, CheckInfo]]] = {}
-    for check_plugin_name, check in check_info.items():
-        group_name = check["group"]
-        if group_name:
-            groups.setdefault(group_name, [])
-            groups[group_name].append((check_plugin_name, check))
-    return groups
+        except (NotImplementedError, KeyError, AssertionError, ValueError) as exc:
+            if cmk.utils.debug.enabled():
+                raise MKGeneralException(exc)
+            console.error(AUTO_MIGRATION_ERR_MSG % ("check plugin", check_plugin_name))
 
 
 # These caches both only hold the base names of the checks
@@ -2058,8 +2113,13 @@ def get_discovery_parameters(
     host_name: HostName,
     check_plugin: CheckPlugin,
 ) -> Union[None, Parameters, List[Parameters]]:
-    if check_plugin.discovery_ruleset_name is None:
+    if check_plugin.discovery_default_parameters is None:
+        # This means the function will not acctept any params.
         return None
+    if check_plugin.discovery_ruleset_name is None:
+        # This means we have default params, but no rule set.
+        # Not very sensical for discovery functions, but not forbidden by the API either.
+        return Parameters(check_plugin.discovery_default_parameters)
 
     config_cache = get_config_cache()
     rules = agent_based_register.get_discovery_ruleset(check_plugin.discovery_ruleset_name)
@@ -2079,11 +2139,13 @@ def get_discovery_parameters(
                               check_plugin.discovery_ruleset_type)
 
 
-def compute_check_parameters(host: HostName,
-                             checktype: Union[CheckPluginNameStr, CheckPluginName],
-                             item: Item,
-                             params: LegacyCheckParameters,
-                             for_static_checks: bool = False) -> Optional[LegacyCheckParameters]:
+def compute_check_parameters(
+    host: HostName,
+    checktype: Union[CheckPluginNameStr, CheckPluginName],
+    item: Item,
+    params: LegacyCheckParameters,
+    for_static_checks: bool = False,
+) -> Optional[LegacyCheckParameters]:
     """Compute parameters for a check honoring factory settings,
     default settings of user in main.mk, check_parameters[] and
     the values code in autochecks (given as parameter params)"""
@@ -2100,15 +2162,19 @@ def compute_check_parameters(host: HostName,
     if plugin is None:  # handle vanished check plugin
         return None
 
-    params = _update_with_default_check_parameters(plugin, params)
+    if plugin.check_default_parameters is not None:
+        params = _update_with_default_check_parameters(plugin.check_default_parameters, params)
+
     if not for_static_checks:
         params = _update_with_configured_check_parameters(host, plugin, item, params)
 
     return params
 
 
-def _update_with_default_check_parameters(plugin: CheckPlugin,
-                                          params: LegacyCheckParameters) -> LegacyCheckParameters:
+def _update_with_default_check_parameters(
+    check_default_parameters: Dict[str, Any],
+    params: LegacyCheckParameters,
+) -> LegacyCheckParameters:
 
     # Handle case where parameter is None but the type of the
     # default value is a dictionary. This is for example the
@@ -2125,7 +2191,7 @@ def _update_with_default_check_parameters(plugin: CheckPlugin,
         # if discovered params is not updateable, it wins
         return params
 
-    default_params = unwrap_parameters(plugin.check_default_parameters)
+    default_params = unwrap_parameters(check_default_parameters)
     if not isinstance(default_params, dict):
         # if default params are not updatetable, discovered params win
         return params
@@ -2544,6 +2610,20 @@ class HostConfig:
 
         return None
 
+    def disabled_snmp_sections(self) -> Set[SectionName]:
+        """Return a set of disabled snmp sections
+        """
+        rules = self._config_cache.host_extra_conf(self.hostname, snmp_exclude_sections)
+        merged_section_settings = {'if64adm': True}
+        for rule in reversed(rules):
+            merged_section_settings.update(dict(rule.get("sections", [])))
+
+        return {
+            SectionName(name)
+            for name, is_disabled in merged_section_settings.items()
+            if is_disabled
+        }
+
     @property
     def agent_port(self) -> int:
         ports = self._config_cache.host_extra_conf(self.hostname, agent_ports)
@@ -2931,15 +3011,20 @@ class HostConfig:
                 host_attributes.get(self.hostname, {}).get("additional_ipv6addresses", []))
 
     def exit_code_spec(self, data_source_id: Optional[str] = None) -> ExitSpec:
-        spec: ExitSpec = {}
+        spec: _NestedExitSpec = {}
         # TODO: Can we use host_extra_conf_merged?
         specs = self._config_cache.host_extra_conf(self.hostname, check_mk_exit_status)
         for entry in specs[::-1]:
             spec.update(entry)
-        return self._merge_with_data_source_exit_code_spec(spec, data_source_id)
 
-    def _merge_with_data_source_exit_code_spec(self, spec: Dict,
-                                               data_source_id: Optional[str]) -> ExitSpec:
+        merged_spec = self._extract_data_source_exit_code_spec(spec, data_source_id)
+        return self._merge_with_optional_exit_code_parameters(spec, merged_spec)
+
+    def _extract_data_source_exit_code_spec(
+        self,
+        spec: _NestedExitSpec,
+        data_source_id: Optional[str],
+    ) -> ExitSpec:
         if data_source_id is not None:
             try:
                 return spec["individual"][data_source_id]
@@ -2953,6 +3038,18 @@ class HostConfig:
 
         # Old configuration format
         return spec
+
+    def _merge_with_optional_exit_code_parameters(
+        self,
+        spec: _NestedExitSpec,
+        merged_spec: ExitSpec,
+    ) -> ExitSpec:
+        # Additional optional parameters which are not part of individual
+        # or overall parameters
+        value = spec.get('restricted_address_mismatch')
+        if value is not None:
+            merged_spec['restricted_address_mismatch'] = value
+        return merged_spec
 
     @property
     def do_status_data_inventory(self) -> bool:
@@ -3618,6 +3715,42 @@ class ConfigCache:
             return the_clusters[0]
 
         return hostname
+
+    def get_clustered_service_node_keys(
+        self,
+        hostname: HostName,
+        source_type: SourceType,
+        service_descr: Optional[ServiceName],
+        lookup_ip_address: Callable[[HostConfig], Optional[HostAddress]],
+    ) -> Optional[List[HostKey]]:
+        """Returns the node keys if a service is clustered, otherwise 'None' in order to
+        decide whether we collect section content of the host or the nodes.
+
+        For real hosts or nodes for which the service is not clustered we return 'None',
+        thus the caching works as before.
+
+        If a service is assigned to a cluster we receive the real nodename. In this
+        case we have to sort out data from the nodes for which the same named service
+        is not clustered (Clustered service for overlapping clusters).
+
+        We also use the result for the section cache.
+        """
+        if not service_descr:
+            return None
+
+        nodes = self.get_host_config(hostname).nodes
+        if nodes is None:
+            return None
+
+        return [
+            HostKey(
+                nodename,
+                lookup_ip_address(self.get_host_config(nodename)),
+                source_type,
+            )
+            for nodename in nodes
+            if hostname == self.host_of_clustered_service(nodename, service_descr)
+        ]
 
     def get_piggybacked_hosts_time_settings(
             self,

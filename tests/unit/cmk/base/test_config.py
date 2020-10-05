@@ -9,19 +9,29 @@ from pathlib import Path
 import pytest  # type: ignore[import]
 from six import ensure_str
 
-from testlib import CheckManager
-from testlib.base import Scenario
+# No stub file
+from testlib import CheckManager  # type: ignore[import]
+# No stub file
+from testlib.base import Scenario  # type: ignore[import]
 
 from cmk.utils.rulesets.ruleset_matcher import RulesetMatchObject
 import cmk.utils.version as cmk_version
 import cmk.utils.paths
 import cmk.utils.piggyback as piggyback
-from cmk.utils.type_defs import CheckPluginName, SectionName
+from cmk.utils.type_defs import (
+    CheckPluginName,
+    HostKey,
+    SectionName,
+    SourceType,
+    ConfigSerial,
+    LATEST_SERIAL,
+)
 
 from cmk.base.caching import config_cache as _config_cache
 import cmk.base.config as config
 from cmk.base.check_utils import Service
 from cmk.base.discovered_labels import DiscoveredServiceLabels, ServiceLabel
+from cmk.snmplib.type_defs import OIDBytes, OIDCached
 
 
 def test_duplicate_hosts(monkeypatch):
@@ -1082,6 +1092,58 @@ def test_host_config_exit_code_spec_individual(monkeypatch, hostname, result):
     assert config_cache.get_host_config(hostname).exit_code_spec(data_source_id="snmp") == result
 
 
+@pytest.mark.parametrize("ruleset", [
+    {
+        "empty_output": 2,
+        'restricted_address_mismatch': 2,
+    },
+    {
+        "overall": {
+            "empty_output": 2,
+        },
+        'restricted_address_mismatch': 2,
+    },
+    {
+        "individual": {
+            "snmp": {
+                "empty_output": 2,
+            }
+        },
+        'restricted_address_mismatch': 2,
+    },
+    {
+        "overall": {
+            "empty_output": 1000,
+        },
+        "individual": {
+            "snmp": {
+                "empty_output": 2,
+            }
+        },
+        'restricted_address_mismatch': 2,
+    },
+])
+def test_host_config_exit_code_spec(monkeypatch, ruleset):
+    hostname = "hostname"
+    ts = Scenario().add_host(hostname)
+    ts.set_ruleset("check_mk_exit_status", [
+        (ruleset, [], ["hostname"], {}),
+    ])
+    config_cache = ts.apply(monkeypatch)
+    host_config = config_cache.get_host_config(hostname)
+
+    exit_code_spec = host_config.exit_code_spec()
+    assert 'restricted_address_mismatch' in exit_code_spec
+    assert exit_code_spec['restricted_address_mismatch'] == 2
+
+    result = {
+        "empty_output": 2,
+        'restricted_address_mismatch': 2,
+    }
+    snmp_exit_code_spec = host_config.exit_code_spec(data_source_id="snmp")
+    assert snmp_exit_code_spec == result
+
+
 @pytest.mark.parametrize("hostname,version,result", [
     ("testhost1", 2, None),
     ("testhost2", 2, "bla"),
@@ -1627,6 +1689,86 @@ def test_config_cache_service_discovery_name(monkeypatch, use_new_descr, result)
     assert config_cache.service_discovery_name() == result
 
 
+def test_config_cache_get_clustered_service_node_keys_no_cluster(monkeypatch):
+    ts = Scenario()
+
+    config_cache = ts.apply(monkeypatch)
+
+    # regardless of config: descr == None -> return None
+    assert config_cache.get_clustered_service_node_keys(
+        'cluster.test',
+        SourceType.HOST,
+        None,
+        lambda _x: "dummy.test.ip.0",
+    ) is None
+    # still None, we have no cluster:
+    assert config_cache.get_clustered_service_node_keys(
+        'cluster.test',
+        SourceType.HOST,
+        'Test Service',
+        lambda _x: "dummy.test.ip.0",
+    ) is None
+
+
+def test_config_cache_get_clustered_service_node_keys_cluster_no_service(monkeypatch):
+    ts = Scenario()
+    ts.add_cluster('cluster.test', nodes=['node1.test', 'node2.test'])
+    config_cache = ts.apply(monkeypatch)
+
+    # None for a node:
+    assert config_cache.get_clustered_service_node_keys(
+        'node1.test',
+        SourceType.HOST,
+        'Test Service',
+        lambda _x: "dummy.test.ip.0",
+    ) is None
+    # empty list for cluster (we have not clustered the service)
+    assert config_cache.get_clustered_service_node_keys(
+        'cluster.test',
+        SourceType.HOST,
+        'Test Service',
+        lambda _x: "dummy.test.ip.0",
+    ) == []
+
+
+def test_config_cache_get_clustered_service_node_keys_clustered(monkeypatch):
+    ts = Scenario()
+    ts.add_host('node1.test')
+    ts.add_host('node2.test')
+    ts.add_cluster('cluster.test', nodes=['node1.test', 'node2.test'])
+    # add a fake rule, that defines a cluster
+    ts.set_option('clustered_services_mapping', [{
+        'value': 'cluster.test',
+        'condition': {
+            'service_description': ['Test Service']
+        },
+    }])
+    config_cache = ts.apply(monkeypatch)
+
+    assert config_cache.get_clustered_service_node_keys(
+        'cluster.test',
+        SourceType.HOST,
+        'Test Service',
+        lambda host_config: "dummy.test.ip.%s" % host_config.hostname[4],
+    ) == [
+        HostKey('node1.test', "dummy.test.ip.1", SourceType.HOST),
+        HostKey('node2.test', "dummy.test.ip.2", SourceType.HOST),
+    ]
+    assert config_cache.get_clustered_service_node_keys(
+        'cluster.test',
+        SourceType.HOST,
+        'Test Unclustered',
+        lambda _x: "dummy.test.ip.0",
+    ) == []
+    # regardless of config: descr == None -> return None
+    assert config_cache.get_clustered_service_node_keys(
+        'cluster.test',
+        SourceType.HOST,
+        None,
+        lambda _x: "dummy.test.ip.0",
+    ) is None
+
+
 def test_host_ruleset_match_object_of_service(monkeypatch):
     ts = Scenario()
     ts.add_host("xyz")
@@ -1910,11 +2052,83 @@ cmc_host_rrd_config = [
 """ % (condition, value))
 
 
-@pytest.mark.parametrize("pack_string", [
-    "_test_var = OIDBytes('6')\n\n",
-    "_test_var = OIDCached('6')\n\n",
-])
-def test_packed_config(pack_string):
-    packed_config = config.PackedConfig()
-    packed_config._write(pack_string)
-    packed_config.load()
+@pytest.fixture(name="serial")
+def fixture_serial():
+    return ConfigSerial("13")
+
+
+def test_save_packed_config(monkeypatch, serial):
+    ts = Scenario()
+    ts.add_host("bla1")
+    config_cache = ts.apply(monkeypatch)
+
+    assert not Path(cmk.utils.paths.core_helper_config_dir, serial,
+                    "precompiled_check_config.mk").exists()
+    assert not Path(cmk.utils.paths.core_helper_config_dir, serial,
+                    "precompiled_check_config.mk.orig").exists()
+
+    config.save_packed_config(serial, config_cache)
+
+    assert Path(cmk.utils.paths.core_helper_config_dir, serial,
+                "precompiled_check_config.mk").exists()
+    assert Path(cmk.utils.paths.core_helper_config_dir, serial,
+                "precompiled_check_config.mk.orig").exists()
+
+
+def test_load_packed_config(serial):
+    config.PackedConfigStore(serial).write("abc = 1")
+
+    assert "abc" not in config.__dict__
+    config.load_packed_config(serial)
+    # Mypy does not understand that we add some new member for testing
+    assert config.abc == 1  # type: ignore[attr-defined]
+    del config.__dict__["abc"]
+
+
+# These types are currently imported into the cmk.base.config namespace, just to be able to load
+# objects of this type from the configuration
+def test_packed_config_able_to_load_snmp_types(serial):
+    config.PackedConfigStore(serial).write(
+        "test_var1 = OIDBytes('6')\n\ntest_var2 = OIDCached('6')\n\n")
+
+    config.load_packed_config(serial)
+    assert config.test_var1 == OIDBytes('6')  # type: ignore[attr-defined]
+    assert config.test_var2 == OIDCached('6')  # type: ignore[attr-defined]
+
+
+class TestPackedConfigStore:
+    @pytest.fixture()
+    def store(self, serial):
+        return config.PackedConfigStore(serial)
+
+    def test_latest_serial_path(self):
+        store = config.PackedConfigStore(serial=LATEST_SERIAL)
+        assert store._compiled_path == Path(cmk.utils.paths.core_helper_config_dir, "latest",
+                                            "precompiled_check_config.mk")
+
+    def test_given_serial_path(self):
+        store = config.PackedConfigStore(serial=ConfigSerial("42"))
+        assert store._compiled_path == Path(cmk.utils.paths.core_helper_config_dir, "42",
+                                            "precompiled_check_config.mk")
+
+    def test_read_not_existing_file(self, store):
+        with pytest.raises(FileNotFoundError):
+            store.read()
+
+    def test_write(self, store, serial):
+        assert not Path(cmk.utils.paths.core_helper_config_dir, serial,
+                        "precompiled_check_config.mk").exists()
+        assert not Path(cmk.utils.paths.core_helper_config_dir, serial,
+                        "precompiled_check_config.mk.orig").exists()
+
+        store.write("abc = 1\n")
+
+        packed_file_path = Path(cmk.utils.paths.core_helper_config_dir, serial,
+                                "precompiled_check_config.mk")
+        assert packed_file_path.exists()
+        assert Path(cmk.utils.paths.core_helper_config_dir, serial,
+                    "precompiled_check_config.mk.orig").exists()
+
+        assert store.read() == {
+            "abc": 1,
+        }

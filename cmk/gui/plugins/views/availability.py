@@ -44,8 +44,9 @@ from cmk.gui.page_menu import (
     PageMenuDropdown,
     PageMenuTopic,
     PageMenuEntry,
-    PageMenuPopup,
+    PageMenuSidePopup,
     make_simple_link,
+    make_simple_form_page_menu,
 )
 
 from cmk.gui.exceptions import MKUserError
@@ -138,14 +139,15 @@ def _handle_availability_option_reset() -> None:
         html.request.del_var("avoptions")
 
 
-def _show_availability_options(what: AVObjectType, avoptions: AVOptions,
+def _show_availability_options(option_type: str, what: AVObjectType, avoptions: AVOptions,
                                valuespecs: AVOptionValueSpecs) -> None:
     html.begin_form("avoptions")
     html.hidden_field("avoptions", "set")
 
     _show_availability_options_controls()
 
-    html.open_div(class_="side_popup_content")
+    container_id = "av_options_%s" % option_type
+    html.open_div(id_=container_id, class_="side_popup_content")
     if html.has_user_errors():
         html.show_user_errors()
 
@@ -342,21 +344,19 @@ def _page_menu_availability(breadcrumb: Breadcrumb, view, what: AVObjectType, av
                             PageMenuEntry(
                                 title=_("Change display options"),
                                 icon_name="painteroptions",
-                                item=PageMenuPopup(
+                                item=PageMenuSidePopup(
                                     _render_avoptions_form(
-                                        what, avoptions, availability.get_av_display_options(what)),
-                                    css_classes=["side_popup"],
-                                ),
+                                        "display", what, avoptions,
+                                        availability.get_av_display_options(what)),),
                                 name="avoptions_display",
                             ),
                             PageMenuEntry(
                                 title=_("Change computation options"),
                                 icon_name="av_computation",
-                                item=PageMenuPopup(
+                                item=PageMenuSidePopup(
                                     _render_avoptions_form(
-                                        what, avoptions, availability.get_av_computation_options()),
-                                    css_classes=["side_popup"],
-                                ),
+                                        "computation", what, avoptions,
+                                        availability.get_av_computation_options()),),
                                 name="avoptions_computation",
                             )
                         ],
@@ -406,10 +406,10 @@ def _page_menu_availability(breadcrumb: Breadcrumb, view, what: AVObjectType, av
     return menu
 
 
-def _render_avoptions_form(what: AVObjectType, avoptions: AVOptions,
+def _render_avoptions_form(option_type: str, what: AVObjectType, avoptions: AVOptions,
                            valuespecs: AVOptionValueSpecs) -> str:
     with html.plugged():
-        _show_availability_options(what, avoptions, valuespecs)
+        _show_availability_options(option_type, what, avoptions, valuespecs)
         return html.drain()
 
 
@@ -1021,22 +1021,24 @@ def show_annotations(annotations, av_rawdata, what, avoptions, omit_service):
             table.cell(_("Until"), render_date(annotation["until"]), css="nobr narrow")
             table.cell("", css="buttons")
             if annotation.get("downtime") is True:
-                html.icon(_("This period has been reclassified as a scheduled downtime"),
-                          "downtime")
+                html.icon("downtime",
+                          _("This period has been reclassified as a scheduled downtime"))
             elif annotation.get("downtime") is False:
                 html.icon(
-                    _("This period has been reclassified as a not being a scheduled downtime"),
-                    "nodowntime")
+                    "nodowntime",
+                    _("This period has been reclassified as a not being a scheduled downtime"))
             recl_host_state = annotation.get("host_state")
             if recl_host_state is not None:
                 html.icon(
+                    "status",
                     _("This period has been reclassified in host state to state: %s" %
-                      host_state_name(recl_host_state)), "status")
+                      host_state_name(recl_host_state)))
             recl_svc_state = annotation.get("service_state")
             if recl_svc_state is not None:
                 html.icon(
+                    "status",
                     _("This period has been reclassified in service state to state: %s" %
-                      service_state_name(recl_svc_state)), "status")
+                      service_state_name(recl_svc_state)))
 
             table.cell(_("Annotation"), html.render_text(annotation["text"]))
             table.cell(_("Author"), annotation["author"])
@@ -1095,17 +1097,11 @@ def edit_annotation(breadcrumb: Breadcrumb) -> bool:
 
     html.body_start(title)
 
-    html.top_heading(title, _edit_annotation_breadcrumb(breadcrumb, title))
-
-    html.begin_context_buttons()
-    html.context_button(_("Abort"), html.makeuri([("anno_host", "")]), "abort")
-    html.end_context_buttons()
+    breadcrumb = _edit_annotation_breadcrumb(breadcrumb, title)
+    html.top_heading(title, breadcrumb, _edit_annotation_page_menu(breadcrumb))
 
     html.begin_form("editanno", method="GET")
     _vs_annotation().render_input_as_form("_editanno", value)
-
-    html.button("save", _("Save"))
-
     html.hidden_fields()
     html.end_form()
 
@@ -1120,6 +1116,10 @@ def _edit_annotation_breadcrumb(breadcrumb: Breadcrumb, title: str) -> Breadcrum
         url=html.makeuri([]),
     ))
     return breadcrumb
+
+
+def _edit_annotation_page_menu(breadcrumb: Breadcrumb) -> PageMenu:
+    return make_simple_form_page_menu(breadcrumb, form_name="editanno", button_name="save")
 
 
 def _validate_reclassify_of_states(value, varprefix):

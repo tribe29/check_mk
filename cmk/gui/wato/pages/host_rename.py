@@ -62,8 +62,7 @@ from cmk.gui.plugins.wato import (
     wato_confirm,
 )
 
-# TODO: I have no clue how to import this correctly...
-from cmk.gui.plugins.wato.bi import BIHostRenamer
+from cmk.utils.bi.bi_packs import BIHostRenamer
 
 try:
     import cmk.gui.cee.plugins.wato.alert_handling as alert_handling  # type: ignore[import]
@@ -718,7 +717,7 @@ def rename_hosts(renamings, job_interface=None):
         except MKAuthException as e:
             auth_problems.append((oldname, e))
 
-    # 2. Check_MK stuff ------------------------------------------------
+    # 2. Checkmk stuff ------------------------------------------------
     job_interface.send_progress_update(
         _("Renaming host(s) in base configuration, rrd, history files, etc."))
     job_interface.send_progress_update(

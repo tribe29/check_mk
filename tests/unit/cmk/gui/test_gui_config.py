@@ -7,6 +7,7 @@
 # pylint: disable=redefined-outer-name
 
 import json
+from flask_babel.speaklater import LazyString  # type: ignore[import]
 
 import pytest  # type: ignore[import]
 
@@ -19,6 +20,7 @@ from cmk.gui.globals import html
 from cmk.gui.permissions import (
     permission_section_registry,
     permission_registry,
+    Permission,
 )
 from cmk.gui.plugins.wato import may_edit_ruleset
 
@@ -59,9 +61,9 @@ def test_registered_permission_sections():
         ('custom_snapin', (50, u'Custom snapins', True)),
         ('sidesnap', (50, u'Sidebar snapins', True)),
         ('notification_plugin', (50, u'Notification plugins', True)),
-        ('wato', (50, u"WATO - Check_MK's Web Administration Tool", False)),
+        ('wato', (50, u"WATO - Checkmk's Web Administration Tool", False)),
         ('background_jobs', (50, u'Background jobs', False)),
-        ('bi', (50, u'BI - Check_MK Business Intelligence', False)),
+        ('bi', (50, u'BI - Checkmk Business Intelligence', False)),
         ('general', (10, u'General Permissions', False)),
         ('mkeventd', (50, u'Event Console', False)),
         ('action', (50, u'Commands on host and services', True)),
@@ -268,7 +270,6 @@ def test_registered_permissions():
         'sidesnap.views',
         'sidesnap.wato_folders',
         'sidesnap.wato_foldertree',
-        'sidesnap.wiki',
         'view.aggr_all',
         'view.aggr_all_api',
         'view.aggr_group',
@@ -509,6 +510,7 @@ def test_registered_permissions():
         'wato.update_dns_cache',
         'wato.use',
         'wato.users',
+        'wato.show_last_user_activity',
         'view.cmk_servers',
         'view.cmk_sites',
         'view.cmk_sites_of_host',
@@ -542,6 +544,7 @@ def test_registered_permissions():
             'wato.bake_agents',
             'wato.dcd_connections',
             'wato.download_all_agents',
+            'wato.license_usage',
             'wato.manage_mkps',
             'wato.mkps',
             'wato.sign_agents',
@@ -595,7 +598,7 @@ def test_registered_permissions():
             'general.publish_custom_graph',
             'general.publish_to_foreign_groups_custom_graph',
             'icons_and_actions.deployment_status',
-            'icons_and_actions.ntop_host_interface',
+            'icons_and_actions.ntop_host',
             'icons_and_actions.ntop_service_interface',
         ]
 
@@ -613,10 +616,9 @@ def test_registered_permissions():
 
     assert sorted(expected_permissions) == sorted(permission_registry.keys())
 
-    for perm_class in permission_registry.values():
-        perm = perm_class()
-        assert isinstance(perm.description, str)
-        assert isinstance(perm.title, str)
+    for perm in permission_registry.values():
+        assert isinstance(perm.description, (str, LazyString))
+        assert isinstance(perm.title, (str, LazyString))
         assert isinstance(perm.defaults, list)
 
 
@@ -645,7 +647,7 @@ def test_declare_permission(monkeypatch):
     config.declare_permission("bla.blub", u"bla perm", u"descrrrrr", ["admin"])
     assert "bla.blub" in permissions.permission_registry
 
-    permission = permissions.permission_registry["bla.blub"]()
+    permission = permissions.permission_registry["bla.blub"]
     assert permission.section == permissions.permission_section_registry["bla"]
     assert permission.name == "bla.blub"
     assert permission.title == u"bla perm"
@@ -675,18 +677,15 @@ def test_permission_sorting(do_sort, result):
         def do_sort(self):
             return do_sort
 
-    section_name = "sec1"
     for permission_name in ["Z", "z", "A", "b", "a", "1", "g"]:
-        cls = type(
-            "TestPermission%s%s" % (section_name.title(), permission_name.title()),
-            (permissions.Permission,), {
-                "section": Sec1,
-                "permission_name": permission_name,
-                "title": permission_name.title(),
-                "description": "bla",
-                "defaults": ["admin"],
-            })
-        perms.register(cls)
+        perms.register(
+            Permission(
+                section=Sec1,
+                name=permission_name,
+                title=permission_name.title(),
+                description="bla",
+                defaults=["admin"],
+            ))
 
     sorted_perms = [p.name for p in perms.get_sorted_permissions(Sec1())]
     assert sorted_perms == result

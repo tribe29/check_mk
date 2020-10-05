@@ -765,6 +765,19 @@ def update_file(relpath: str, site: SiteContext, conflict_mode: str, old_version
     old_skel = site.version_skel_dir
     new_skel = "/omd/versions/%s/skel" % new_version
 
+    ignored_prefixes = [
+        # We removed dokuwiki from the OMD packages with 2.0.0i1. To prevent users from
+        # accidentally removing configs or their dokuwiki content, we skip the questions to
+        # remove the dokuwiki files here.
+        "etc/dokuwiki",
+        "var/dokuwiki",
+        "local/share/dokuwiki",
+    ]
+    for prefix in ignored_prefixes:
+        if relpath.startswith(prefix):
+            sys.stdout.write(f"{StateMarkers.good} Keeping your   {relpath}\n")
+            return
+
     replacements = site.replacements
 
     old_path = old_skel + "/" + relpath
@@ -1236,22 +1249,11 @@ def config_set_value(site: SiteContext,
                      hook_name: str,
                      value: str,
                      save: bool = True) -> None:
-    # TODO: Warum wird hier nicht call_hook() aufgerufen!!
-
-    # Call hook with 'set'. If it outputs something, that will
-    # be our new value (i.e. hook disagrees with the new setting!)
-    commandline = "%s/lib/omd/hooks/%s set '%s'" % (site.dir, hook_name, value)
-    if is_root():
-        sys.stderr.write("I am root. This should never happen!\n")
-        sys.exit(1)
-
-        # commandline = 'su -p -l %s -c "%s"' % (site.name, commandline)
-    answer = os.popen(commandline).read()  # nosec
-    if len(answer) > 0:
-        value = answer.strip()
-
     site.conf[hook_name] = value
-    putenv("CONFIG_" + hook_name, value)
+    _config_set(site, hook_name)
+
+    if hook_name in ["CORE", "MKEVENTD", "PNP4NAGIOS"]:
+        _update_cmk_core_config(site)
 
     if save:
         save_site_conf(site)
@@ -1965,6 +1967,7 @@ def finalize_site_as_user(version_info: VersionInfo,
     # Run all hooks in order to setup things according to the
     # configuration settings
     config_set_all(site, ignored_hooks)
+    _update_cmk_core_config(site)
     initialize_site_ca(site)
     save_site_conf(site)
 
@@ -2353,7 +2356,7 @@ def main_update(version_info: VersionInfo, site: SiteContext, global_opts: 'Glob
         (site.name, from_version, to_version), "Update!", "Abort"):
         bail_out("Aborted.")
 
-    # In case the user changes the installed Check_MK Edition during update let the
+    # In case the user changes the installed Checkmk Edition during update let the
     # user confirm this step.
     from_edition, to_edition = _get_edition(from_version), _get_edition(to_version)
     if from_edition != to_edition and not global_opts.force and not dialog_yesno(
@@ -2416,31 +2419,22 @@ def main_update(version_info: VersionInfo, site: SiteContext, global_opts: 'Glob
     initialize_livestatus_tcp_tls_after_update(site)
     initialize_site_ca(site)
 
-    # Let hooks of the new(!) version do their work and update configuration.  Explicitly skip the
-    # CORE hook here, because it executes "cmk -U" which needs the tmpfs to be mounted first (is
-    # done in the next step).
-    #
-    # We can not simply move config_set_all after prepare_and_populate_tmpfs, because
-    # prepare_and_populate_tmpfs needs this to be executed, because it may introduce new config
-    # variables and set their default setting during update
-    #
-    # The CORE hook is explicitly called after prepare_and_populate_tmpfs.
-    #
-    # TODO: We should check whether or not we can move the "cmk" command from the CORE hook to
-    # another place. Then we could really execute all hooks here.
-    config_set_all(site, ignored_hooks=["CORE"])
+    # Let hooks of the new(!) version do their work and update configuration.
+    config_set_all(site)
 
-    # Before the hooks can be executed the tmpfs needs to be mounted, e.g. the Checkmk configuration
-    # is being updated (cmk -U). This requires access to the initialized tmpfs.
+    # Before the hooks can be executed the tmpfs needs to be mounted. This requires access to the
+    # initialized tmpfs.
     prepare_and_populate_tmpfs(version_info, site)
 
     call_scripts(site, 'update-pre-hooks')
 
-    # Now executed the postponed CORE hook
+    # We previously executed "cmk -U" multiple times in the hooks CORE, MKEVENTD, PNP4NAGIOS to
+    # update the core configuration. To only execute it once, we do it here.
+    #
     # Please note that this is explicitly done AFTER update-pre-hooks, because that executes
     # "cmk-update-config" which updates e.g. the autochecks from previous versions to make it
     # loadable by the code of the NEW version
-    _config_set(site, "CORE")
+    _update_cmk_core_config(site)
 
     save_site_conf(site)
 
@@ -2448,6 +2442,14 @@ def main_update(version_info: VersionInfo, site: SiteContext, global_opts: 'Glob
 
     sys.stdout.write('Finished update.\n\n')
     stop_logging()
+
+
+def _update_cmk_core_config(site: SiteContext):
+    if site.conf["CORE"] == "none":
+        return  # No core config is needed in this case
+
+    sys.stdout.write("Updating core configuration...\n")
+    subprocess.call(["cmk", "-U"], shell=False)
 
 
 def initialize_livestatus_tcp_tls_after_update(site: SiteContext) -> None:

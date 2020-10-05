@@ -13,12 +13,6 @@ body.main {
       display: none;
     }
   }
-
-  &.hide_suggestions {
-    tr#suggestions {
-      display: none;
-    }
-  }
 }
 
 div#top_heading {
@@ -112,8 +106,7 @@ div#top_heading {
       color: $font-color;
     }
 
-    // TODO: Check whether this selector works at all
-    :after {
+    > :after {
       text-decoration: none;
       content: " > ";
     }
@@ -159,7 +152,8 @@ div#top_heading {
       border-bottom: 2px solid $page-menu-bg-color;
 
       &.disabled {
-        display: none;
+        pointer-events: none;
+        filter: grayscale(100%) brightness(55%);
       }
 
       &:focus {
@@ -176,7 +170,7 @@ div#top_heading {
 
       div.popup_trigger {
         height: 100%;
-        min-width: 78px;
+        padding: 0 (0.5 * $spacing);
 
         > a {
           text-align: center;
@@ -219,11 +213,6 @@ div#top_heading {
           width: 16px;
           height: auto;
           margin-right: 7px;
-        }
-
-        a.more img {
-          width: auto;
-          height: 20px;
         }
 
         div.topic {
@@ -286,7 +275,24 @@ div#top_heading {
             }
           }
         }
+
+        div.more_container {
+          position: relative;
+          width: 100%;
+
+          a.more {
+            position: absolute;
+            top: -2px;
+            right: -5px;
+          }
+        }
       }
+    }
+
+    &#page_menu_bar.hide_suggestions {
+      td.shortcuts a.suggested { display: inline-block; }
+      tr#suggestions { display: none; }
+      a#menu_shortcut_toggle_suggestions { transform: rotate(180deg); }
     }
   }
 
@@ -297,47 +303,54 @@ div#top_heading {
       width: 100%;
       padding: 6px 3px 3px 0;
 
-      div.suggestion {
-        display: flex;
-        align-items: center;
-        justify-content: center;
-        float: left;
-        height: 34px;
-        padding: 0 11px;
-        margin: 2px 5px;
-        font-size: 12px;
-        font-weight: bold;
-        color: $white;
-        cursor: pointer;
-        background-color: $button-bg-color-secondary;
-        border-radius: 4px;
-
-        &:nth-child(1) {
-          margin-left: 0;
-        }
-
-        a {
-          text-decoration: none;
-
-          img {
-            margin-right: 6px;
-          }
-        }
-      }
-
       @keyframes easyhoverbg {
         from { background-color: 1px solid $button-bg-color-secondary; }
         to { background-color: 1px solid $button-bg-color-secondary-hover; }
       }
 
-      div.suggestion:hover {
-        animation-duration: 0.5s;
-        animation-name: easyhoverbg;
-        animation-fill-mode: forwards;
+      div.suggestion {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        float: left;
+        margin: 2px 5px;
 
-        div.title, div.explanation {
-          animation-duration: 0.5s;
-          animation-fill-mode: forwards;
+        &:nth-child(1) {
+          margin-left: 0;
+        }
+
+        &.disabled {
+          pointer-events: none;
+          filter: grayscale(100%) brightness(55%);
+        }
+
+        a {
+          display: flex;
+          align-items: center;
+          justify-content: center;
+
+          height: 34px;
+          padding: 0 11px;
+
+          font-size: 12px;
+          font-weight: bold;
+          color: $button-font-color-default;
+          text-decoration: none;
+          background-color: $button-bg-color-secondary;
+          border-radius: 4px;
+
+          img {
+            margin-right: 6px;
+          }
+
+          &:hover {
+            cursor: pointer;
+            background-color: $button-bg-color-secondary-hover;
+
+            animation-duration: 0.5s;
+            animation-name: easyhoverbg;
+            animation-fill-mode: forwards;
+          }
         }
       }
     }
@@ -349,7 +362,7 @@ div#page_menu_popups {
     position: relative;
     display: none;
     padding: 10px;
-    background-color: $form-bg-color;
+    background-color: $base-color;
     border: none;
     border-radius: $popup-filters-border-radius;
 
@@ -372,7 +385,7 @@ div#page_menu_popups {
       a.close_popup img {
         position: absolute;
         top: 1px;
-        right: 6px;
+        right: 16px;
         width: 16px;
         height: auto;
       }
@@ -390,7 +403,7 @@ div#page_menu_popups {
 
 
     select, .tagify__input, span.select2 .select2-selection, input[type="checkbox"] + label::before, input:not(.reset):not([type="submit"])  {
-      background-color: $odd-tr-bg-color;
+      background-color: $bg-color;
     }
 
     input.submit {
@@ -413,62 +426,54 @@ div#page_menu_popups div.side_popup {
   width: 375px;
   height: 100vh;
   padding: 0;
+  border-left: $popup-border;
 
   form {
     width: inherit;
     text-align: left;
 
     div.side_popup_content {
-      height: 100vh;
+      height: calc(100vh - 86px);
       overflow-x: hidden;
       overflow-y: auto;
     }
 
     /* general floatfilter elment styling */
-    div.floatfilter, div.floatfilter.double {
-      display: block;
-      float: none;
-      height: auto;
-      padding: 0;
-      padding-right: 8px;
-      padding-bottom: 3px;
+    div.floatfilter {
+      padding: 0 8px 3px $spacing;
       margin: 0;
-      overflow: visible;
-      background-color: $button-bg-color-default;
+      background-color: $base-color;
       border-style: none;
       border-radius: 0;
       box-shadow: none;
 
       input.neg[type="text"] {
-        width: 84%;
-      }
-
-      div.legend {
-        width: 100%;
-        margin: 0;
-        margin-bottom: 4px;
-        font-size: 10px;
-        font-weight: normal;
-        color: $font-color;
-        text-align: left;
-        text-transform: uppercase;
-        border-radius: 0;
+        width: 81%;
       }
 
       div.content {
-        height: auto;
-        padding: 0;
+        padding: 1px 0 5px;
+        overflow: auto;
       }
 
       span.select2-container--default {
         display: inline-block;
+
+        &:last-child { width: auto !important; }
+      }
+
+      &.host_auxtags {
+        div.content { padding-bottom: 1px; }
+        span.select2-container--default { margin-bottom: 4px; }
+      }
+
+      &.address_families {
+        div.content { padding-bottom: 1px; }
       }
     }
 
     /* case 1: filters in list of valuespec (view filters) */
     table.filterform {
-      width: 100%;
-
       table.valuespec_listof.filter {
         border-spacing: 0;
 
@@ -477,19 +482,23 @@ div#page_menu_popups div.side_popup {
         }
 
         > tbody > tr > td {
-          padding: 11px 0 0 11px;
+          padding: 10px 0 10px 10px;
           border-bottom: 1px solid $headline-color;
-        }
 
-        div.floatfilter {
-          width: 333px;
+          &.vlof_content {
+            padding-right: 10px;
+            padding-left: 5px;
+
+            div.floatfilter {
+              width: 323px;
+            }
+          }
         }
       }
     }
 
     /* case 2: floatfilters in list of valuespec (availability options) */
-    > div.side_popup_content > div.floatfilter,
-    > div.side_popup_content > div.floatfilter.double {
+    > div.side_popup_content div.simplebar-content > div.floatfilter {
       width: 100%;
       padding: 10px;
       border: none;
@@ -507,12 +516,10 @@ div#page_menu_popups div.side_popup {
       display: flex;
       align-items: flex-end;
       justify-content: space-between;
-
       padding: 10px;
       margin: 0;
-      border-top: $primary-table-border;
-      border-bottom: $primary-table-border;
-      border-color: $headline-color;
+      border-top: $popup-inner-border;
+      border-bottom: $popup-inner-border;
 
       a.add {
         display: inline-block;
@@ -535,7 +542,7 @@ div#page_menu_popups div.side_popup {
         &:hover, &.active {
           img {
             opacity: 1;
-            filter: brightness(100);
+            filter: $filter-add-button-hover-brightness;
           }
           div.description { color: $font-color; }
         }
@@ -550,13 +557,17 @@ div#page_menu_popups div.side_popup {
         }
 
         input.reset {
+          margin-right: 8px;
           border-color: $font-color;
+          background-color: transparent;
+
+          &:disabled { opacity: .5; }
         }
       }
     }
   }
 
-  div#popup_filter_list {
+  div.popup_filter_list {
     position: fixed;
     top: 0;
     right: 375px;
@@ -565,11 +576,13 @@ div#page_menu_popups div.side_popup {
     height: 100vh;
     padding: 0;
     overflow: auto;
-    background-color: rgb(53, 63, 74);
+    background-color: $base-color;
     border: none;
 
     &.active {
       display: block;
+      border-left: $popup-border;
+      border-right: $popup-inner-border;
     }
 
     div.filter_group:last-child { margin-bottom: 10px; }
@@ -584,11 +597,13 @@ div#page_menu_popups div.side_popup {
 
     a.more {
       position: absolute;
+      top: 6px;
       right: 4px;
     }
 
     ul {
       padding: 0 20px;
+      margin-top: 0;
 
       li {
         list-style: none;
@@ -614,95 +629,4 @@ div#page_menu_popups div.side_popup {
       display: none;
     }
   }
-}
-
-/* Make "check all" thingy invisible, since it is in the menu now */
-table.data th input.checkgroup {
-  display: none;
-}
-
-/* Ein bisschen Styling für das Darktheme - unabhängig vom Inpage */
-.wato table.data {
-  border-style: none;
-  box-shadow: none;
-
-  &:not(.job_table) th {
-    background: transparent;
-
-    &.header_state {
-      color: #777 !important;
-      background: transparent !important;
-    }
-  }
-}
-
-div#service_container {
-  table.data {
-    tr.data > td {
-      height: auto;
-      padding: 3px 7px;
-
-      &:not(.gap):not(.fillup):not(.bulksearch):not(.bulkactions) {
-        border-top: none;
-        border-bottom: none;
-      }
-    }
-
-    tr.groupheader {
-      background-color: transparent;
-    }
-
-    th {
-      color: #777;
-    }
-
-    td h3 {
-      margin-top: 13px;
-    }
-  }
-
-  h3 {
-    margin-top: 13px;
-    font-size: 13px;
-    color: #aaa;
-    text-transform: uppercase;
-
-    img {
-      position: relative;
-      top: -1px;
-      margin-left: 5px;
-    }
-  }
-
-  tr.data td {
-    &:nth-child(1) {
-      width: 96px;
-      max-width: 96px;
-      min-width: 96px;
-    }
-
-    &:nth-child(2) {
-      width: 40px;
-      max-width: 40px;
-      min-width: 40px;
-    }
-
-    &:nth-child(3) {
-      width: 250px;
-      max-width: 250px;
-      min-width: 250px;
-      white-space: nowrap;
-    }
-  }
-}
-
-div.help {
-  text-transform: none; /* Neccessary due to help in H3 */
-}
-
-div.wato h3 {
-  margin-bottom: 12px;
-  font-size: 14px;
-  color: #aaa;
-  text-transform: uppercase;
 }

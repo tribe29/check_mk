@@ -293,7 +293,7 @@ def test_registered_commands():
         cmd_spec = expected[cmd.ident]
         assert cmd.title == cmd_spec["title"]
         assert cmd.tables == cmd_spec["tables"], cmd.ident
-        assert cmd.permission().name == cmd_spec["permission"]
+        assert cmd.permission.name == cmd_spec["permission"]
 
 
 def test_legacy_register_command(monkeypatch):
@@ -6069,6 +6069,8 @@ def test_registered_display_hints():
     '.software.applications.check_mk.sites:*.npcd',
     '.software.applications.check_mk.sites:*.check_helper_usage',
     '.software.applications.check_mk.sites:*.check_mk_helper_usage',
+    '.software.applications.check_mk.sites:*.fetcher_helper_usage',
+    '.software.applications.check_mk.sites:*.checker_helper_usage',
     '.software.applications.check_mk.sites:*.livestatus_usage',
     '.software.applications.check_mk.sites:*.num_hosts',
     '.software.applications.check_mk.sites:*.num_services',
@@ -6184,6 +6186,7 @@ def test_registered_display_hints():
     '.software.applications.oracle.instance:*.logins',
     '.software.applications.oracle.instance:*.logmode',
     '.software.applications.oracle.instance:*.openmode',
+    '.software.applications.oracle.instance:*.pname',
     '.software.applications.oracle.instance:*.sid',
     '.software.applications.oracle.instance:*.version',
     '.software.applications.oracle.recovery_area:',

@@ -35,15 +35,14 @@ SNMPWalkOptions = Dict[str, List[OID]]
 #   |    \____|\___|_| |_|\___|_|  |_|\___| |____/|_| \_|_|  |_|_|         |
 #   |                                                                      |
 #   +----------------------------------------------------------------------+
-#   | Top level functions to realize SNMP functionality for Check_MK.      |
+#   | Top level functions to realize SNMP functionality for Checkmk.      |
 #   '----------------------------------------------------------------------'
 
 
 # Contextes can only be used when check_plugin_name is given.
 def get_single_oid(oid: str,
-                   section_name: Optional[SectionName] = None,
-                   do_snmp_scan: bool = True,
                    *,
+                   section_name: Optional[SectionName] = None,
                    backend: ABCSNMPBackend) -> Optional[SNMPDecodedString]:
     # The OID can end with ".*". In that case we do a snmpgetnext and try to
     # find an OID with the prefix in question. The *cache* is working including

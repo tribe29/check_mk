@@ -617,24 +617,24 @@ class BIAggregatorNode extends node_visualization_viewport_utils.AbstractGUINode
                                                                               this.viewport.recompute_node_chunk_descendants_and_links(this.node.data.chunk)
                                                                               this.viewport.update_layers()
             }, href: "",
-                            img: theme_prefix + "/images/icons/icons8-expand-48.png"})
+                            img: theme_prefix + "/images/icon_expand.png"})
         else
             elements.push({text: "Collapse this node", on: ()=>{d3.event.stopPropagation(); this.collapse_node()}, href: "",
-                            img: theme_prefix + "/images/icons/icons8-collapse-48.png"})
+                            img: theme_prefix + "/images/icon_collapse.png"})
 
         elements.push({text: "Expand all nodes", on: ()=>{d3.event.stopPropagation();
                                                                 this.expand_node_including_children(this.node.data.chunk.tree)
                                                                 this.viewport.recompute_node_chunk_descendants_and_links(this.node.data.chunk)
                                                                 this.viewport.update_layers()
                                                             }, href: "",
-                            img: theme_prefix + "/images/icons/icons8-expand-48.png"})
+                            img: theme_prefix + "/images/icon_expand.png"})
 
         elements.push({text: "Below this node, show only problems", on: ()=>{
                             d3.event.stopPropagation()
                             this._filter_root_cause(this.node)
                             this.viewport.recompute_node_chunk_descendants_and_links(this.node.data.chunk)
                             this.viewport.update_layers()
-                        }, img: theme_prefix + "/images/icons/icons8-error-48.png"})
+                        }, img: theme_prefix + "/images/icon_error.png"})
         return elements
     }
 }
@@ -684,8 +684,8 @@ class NodeLink {
         let target = this.link_data.target
         let force_type = node_visualization_layout_styles.LayoutStyleForce.prototype.type()
 
-        let is_force = source.data.current_positioning.style_type == force_type ||
-                       target.data.current_positioning.style_type == force_type
+        let is_force = source.data.current_positioning.type == force_type ||
+                       target.data.current_positioning.type == force_type
         if (source.data.transition_info.use_transition ||
             target.data.transition_info.use_transition || is_force)
             this.selection.interrupt()

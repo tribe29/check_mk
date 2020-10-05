@@ -255,9 +255,9 @@ def bulletlink(text, url, target="main", onclick=None):
     html.close_li()
 
 
-def iconlink(text, url, icon):
+def iconlink(text, url, icon, emblem=None):
     html.open_a(class_=["iconlink", "link"], target="main", href=url)
-    html.icon(icon=icon, title=None, cssclass="inline")
+    html.icon(icon, cssclass="inline", emblem=emblem)
     html.write_text(text)
     html.close_a()
     html.br()
@@ -357,6 +357,7 @@ def make_topic_menu(visuals: List[Tuple[str, Tuple[str, Visual]]]) -> List[Topic
                 sort_index=visual["sort_index"],
                 is_advanced=visual["is_advanced"],
                 icon_name=visual["icon"],
+                emblem=visual.get("emblem", None),
             ))
 
     # Sort the items of all topics
@@ -404,7 +405,7 @@ def _show_topic(treename: str, topic: TopicMenuTopic, show_item_icons: bool) -> 
     for item in topic.items:
         if show_item_icons:
             html.open_li(class_="sidebar")
-            iconlink(item.title, item.url, item.icon_name)
+            iconlink(item.title, item.url, item.icon_name, item.emblem)
             html.close_li()
         else:
             bulletlink(item.title, item.url, onclick="return cmk.sidebar.wato_views_clicked(this)")

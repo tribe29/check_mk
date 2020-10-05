@@ -47,7 +47,7 @@ from cmk.gui.valuespec import (
 )
 
 from cmk.gui.plugins.wato import (
-    EventsMode,
+    ABCEventsMode,
     mode_registry,
     wato_confirm,
     make_action_link,
@@ -78,7 +78,7 @@ from cmk.gui.page_menu import (
 NotificationRule = Dict[str, Any]
 
 
-class ABCNotificationsMode(EventsMode):
+class ABCNotificationsMode(ABCEventsMode):
     # TODO: Clean this up. Use inheritance
     @classmethod
     def _rule_match_conditions(cls):
@@ -160,7 +160,6 @@ class ABCNotificationsMode(EventsMode):
                         "These notifications will be processed by the rule based notification "
                         "system of Check_MK. This matching option helps you distinguishing "
                         "and also gives you access to special event fields."),
-                 style="dropdown",
                  elements=[
                      FixedValue(False, title=_("Do not match Event Console alerts"), totext=""),
                      Dictionary(
@@ -240,9 +239,9 @@ class ABCNotificationsMode(EventsMode):
                     table.cell(css="buttons")
                     what, _anarule, reason = analyse_rules[nr + start_nr]
                     if what == "match":
-                        html.icon(_("This rule matches"), "rulematch")
+                        html.icon("rulematch", _("This rule matches"))
                     elif what == "miss":
-                        html.icon(_("This rule does not match: %s") % reason, "rulenmatch")
+                        html.icon("rulenmatch", _("This rule does not match: %s") % reason)
 
                 if show_buttons and self._actions_allowed(rule):
                     table.cell(_("Actions"), css="buttons")
@@ -259,8 +258,8 @@ class ABCNotificationsMode(EventsMode):
 
                 table.cell("", css="narrow")
                 if rule.get("disabled"):
-                    html.icon(_("This rule is currently disabled and will not be applied"),
-                              "disabled")
+                    html.icon("disabled",
+                              _("This rule is currently disabled and will not be applied"))
                 else:
                     html.empty_icon_button()
 
@@ -273,15 +272,15 @@ class ABCNotificationsMode(EventsMode):
 
                 table.cell(_("Type"), css="narrow")
                 if notify_method[1] is None:
-                    html.icon(_("Cancel notifications for this plugin type"), "notify_cancel")
+                    html.icon("notify_cancel", _("Cancel notifications for this plugin type"))
                 else:
-                    html.icon(_("Create a notification"), "notify_create")
+                    html.icon("notify_create", _("Create a notification"))
 
                 table.cell(_("Plugin"), notify_plugin or _("Plain Email"), css="narrow nowrap")
 
                 table.cell(_("Bulk"), css="narrow")
                 if "bulk" in rule or "bulk_period" in rule:
-                    html.icon(_("This rule configures bulk notifications."), "bulk")
+                    html.icon("bulk", _("This rule configures bulk notifications."))
 
                 table.cell(_("Description"))
                 url = rule.get("docu_url")
@@ -600,7 +599,7 @@ class ModeNotifications(ABCNotificationsMode):
 
     def _render_bulks(self, only_ripe):
         bulks = watolib.check_mk_local_automation("notification-get-bulks",
-                                                  ["1" if only_ripe else "0"], None)
+                                                  ["1" if only_ripe else "0"])
         if not bulks:
             return False
 
@@ -618,13 +617,13 @@ class ModeNotifications(ABCNotificationsMode):
                 table.cell(_("Max. Age (sec)"), "%s" % interval, css="number")
                 table.cell(_("Age (sec)"), "%d" % age, css="number")
                 if interval and age >= interval:
-                    html.icon(_("Age of oldest notification is over maximum age"), "warning")
+                    html.icon("warning", _("Age of oldest notification is over maximum age"))
                 table.cell(_("Timeperiod"), "%s" % timeperiod)
                 table.cell(_("Max. Count"), str(maxcount), css="number")
                 table.cell(_("Count"), str(len(uuids)), css="number")
                 if len(uuids) >= maxcount:
-                    html.icon(_("Number of notifications exceeds maximum allowed number"),
-                              "warning")
+                    html.icon("warning",
+                              _("Number of notifications exceeds maximum allowed number"))
         return True
 
     def _show_notification_backlog(self):
@@ -662,7 +661,7 @@ class ModeNotifications(ABCNotificationsMode):
 
                 if (html.request.var("analyse") and
                         nr == html.request.get_integer_input_mandatory("analyse")):
-                    html.icon(_("You are analysing this notification"), "rulematch")
+                    html.icon("rulematch", _("You are analysing this notification"))
 
                 table.cell(_("Nr."), nr + 1, css="number")
                 if "MICROTIME" in context:
@@ -688,13 +687,13 @@ class ModeNotifications(ABCNotificationsMode):
                     table.cell(_("State"), statename, css=css)
                 elif nottype.startswith("DOWNTIME"):
                     table.cell(_("State"))
-                    html.icon(_("Downtime"), "downtime")
+                    html.icon("downtime", _("Downtime"))
                 elif nottype.startswith("ACK"):
                     table.cell(_("State"))
-                    html.icon(_("Acknowledgement"), "ack")
+                    html.icon("ack", _("Acknowledgement"))
                 elif nottype.startswith("FLAP"):
                     table.cell(_("State"))
-                    html.icon(_("Flapping"), "flapping")
+                    html.icon("flapping", _("Flapping"))
                 else:
                     table.cell(_("State"), "")
 
@@ -936,32 +935,32 @@ class ModePersonalUserNotifications(ABCUserNotificationsMode):
         return mega_menu_registry.menu_user()
 
     def page_menu(self, breadcrumb: Breadcrumb) -> PageMenu:
-        menu = cmk.gui.wato.user_profile.user_page_menu("user_notifications_p", breadcrumb)
-
-        menu.dropdowns.insert(
-            0,
-            PageMenuDropdown(
-                name="rules",
-                title=_("Rules"),
-                topics=[
-                    PageMenuTopic(
-                        title=_("Personal rules"),
-                        entries=[
-                            PageMenuEntry(
-                                title=_("Add rule"),
-                                icon_name="new",
-                                item=make_simple_link(
-                                    watolib.folder_preserving_link([("mode", "notification_rule_p")
-                                                                   ])),
-                                is_shortcut=True,
-                                is_suggested=True,
-                            ),
-                        ],
-                    )
-                ],
-            ))
-
-        return menu
+        return PageMenu(
+            dropdowns=[
+                PageMenuDropdown(
+                    name="rules",
+                    title=_("Rules"),
+                    topics=[
+                        PageMenuTopic(
+                            title=_("Personal rules"),
+                            entries=[
+                                PageMenuEntry(
+                                    title=_("Add rule"),
+                                    icon_name="new",
+                                    item=make_simple_link(
+                                        watolib.folder_preserving_link([("mode",
+                                                                         "notification_rule_p")])),
+                                    is_shortcut=True,
+                                    is_suggested=True,
+                                ),
+                            ],
+                        )
+                    ],
+                ),
+                cmk.gui.wato.user_profile.page_menu_dropdown_user_related("user_notifications_p"),
+            ],
+            breadcrumb=breadcrumb,
+        )
 
     def _user_id(self):
         return config.user.id
@@ -1230,13 +1229,13 @@ class ABCEditNotificationRuleMode(ABCNotificationsMode):
 
         headers_part2: List[Union[_Tuple[str, List[str]], _Tuple[str, str, List[str]]]] = [
             (_("Conditions"), [
-                "match_site", "match_folder", "match_hosttags", "match_hostgroups", "match_hosts",
-                "match_exclude_hosts", "match_servicegroups", "match_exclude_servicegroups",
-                "match_servicegroups_regex", "match_exclude_servicegroups_regex", "match_services",
-                "match_exclude_services", "match_checktype", "match_contacts",
-                "match_contactgroups", "match_plugin_output", "match_timeperiod",
-                "match_escalation", "match_escalation_throttle", "match_sl", "match_host_event",
-                "match_service_event", "match_ec", "match_notification_comment"
+                "match_site", "match_folder", "match_hosttags", "match_hostlabels",
+                "match_hostgroups", "match_hosts", "match_exclude_hosts", "match_servicelabels",
+                "match_servicegroups", "match_exclude_servicegroups", "match_servicegroups_regex",
+                "match_exclude_servicegroups_regex", "match_services", "match_exclude_services",
+                "match_checktype", "match_contacts", "match_contactgroups", "match_plugin_output",
+                "match_timeperiod", "match_escalation", "match_escalation_throttle", "match_sl",
+                "match_host_event", "match_service_event", "match_ec", "match_notification_comment"
             ]),
         ]
 
@@ -1286,14 +1285,14 @@ class ABCEditNotificationRuleMode(ABCNotificationsMode):
                            forth=lambda x: x if isinstance(x, tuple) else ("always", x))),
             ],
             optional_keys=[
-                "match_site", "match_folder", "match_hosttags", "match_hostgroups", "match_hosts",
-                "match_exclude_hosts", "match_servicegroups", "match_exclude_servicegroups",
-                "match_servicegroups_regex", "match_exclude_servicegroups_regex", "match_services",
-                "match_exclude_services", "match_contacts", "match_contactgroups",
-                "match_plugin_output", "match_timeperiod", "match_escalation",
-                "match_escalation_throttle", "match_sl", "match_host_event", "match_service_event",
-                "match_ec", "match_notification_comment", "match_checktype", "bulk",
-                "contact_users", "contact_groups", "contact_emails", "contact_match_macros",
+                "match_site", "match_folder", "match_hosttags", "match_hostlabels",
+                "match_hostgroups", "match_hosts", "match_exclude_hosts", "match_servicelabels",
+                "match_servicegroups", "match_exclude_servicegroups", "match_servicegroups_regex",
+                "match_exclude_servicegroups_regex", "match_services", "match_exclude_services",
+                "match_contacts", "match_contactgroups", "match_plugin_output", "match_timeperiod",
+                "match_escalation", "match_escalation_throttle", "match_sl", "match_host_event",
+                "match_service_event", "match_ec", "match_notification_comment", "match_checktype",
+                "bulk", "contact_users", "contact_groups", "contact_emails", "contact_match_macros",
                 "contact_match_groups"
             ],
             headers=headers_part1 + contact_headers + headers_part2,
@@ -1318,15 +1317,12 @@ class ABCEditNotificationRuleMode(ABCNotificationsMode):
                     orientation="horizontal",
                 )
 
-            vs_alternative = Alternative(
-                style="dropdown",
-                elements=[
-                    vs,
-                    FixedValue(None,
-                               totext=_("previous notifications of this type are cancelled"),
-                               title=_("Cancel previous notifications")),
-                ],
-            )
+            vs_alternative = Alternative(elements=[
+                vs,
+                FixedValue(None,
+                           totext=_("previous notifications of this type are cancelled"),
+                           title=_("Cancel previous notifications")),
+            ],)
 
             choices.append((script_name, title, vs_alternative))
         return choices

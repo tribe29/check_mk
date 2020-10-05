@@ -13,7 +13,7 @@ import cmk.utils.render
 import cmk.base.config as config
 import cmk.base.core_config as core_config
 import cmk.base.obsolete_output as out
-import cmk.base.data_sources as data_sources
+import cmk.base.checkers as checkers
 import cmk.base.ip_lookup as ip_lookup
 import cmk.base.check_table as check_table
 import cmk.base.checking as checking
@@ -82,13 +82,13 @@ def dump_host(hostname: HostName) -> None:
     out.output(tty.yellow + "Contact groups:         " + tty.normal +
                ", ".join(host_config.contactgroups) + "\n")
 
-    agenttypes = []
-    for source in data_sources.make_sources(
+    agenttypes = [
+        source.description for source in checkers.make_sources(
             host_config,
             ipaddress,
-            mode=data_sources.Mode.NONE,
-    ):
-        agenttypes.append(source.description)
+            mode=checkers.Mode.NONE,
+        )
+    ]
 
     if host_config.is_ping_host:
         agenttypes.append('PING only')

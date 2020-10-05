@@ -9,7 +9,8 @@ while the inventory is performed for one host.
 In the future all inventory code should be moved to this module."""
 
 import os
-from typing import cast, Dict, List, Optional, Tuple
+from typing import Dict, List, Optional, Sequence, Tuple
+from contextlib import suppress
 
 import cmk.utils.cleanup
 import cmk.utils.debug
@@ -23,25 +24,28 @@ from cmk.utils.structured_data import StructuredDataTree
 from cmk.utils.type_defs import (
     HostAddress,
     HostName,
-    Metric,
+    MetricTuple,
+    Result,
     ServiceAdditionalDetails,
     ServiceDetails,
     ServiceState,
     SourceType,
 )
 
+from cmk.fetchers.type_defs import Mode
+
 import cmk.base.api.agent_based.register as agent_based_register
 import cmk.base.check_api_utils as check_api_utils
 import cmk.base.config as config
-import cmk.base.data_sources as data_sources
+import cmk.base.checkers as checkers
 import cmk.base.decorator
 import cmk.base.ip_lookup as ip_lookup
 import cmk.base.section as section
 
-from cmk.base.api.agent_based.inventory_classes import Attributes, TableRow
-from cmk.base.api.agent_based.type_defs import InventoryGenerator
-from cmk.base.data_sources.host_sections import HostKey, MultiHostSections
-from cmk.base.data_sources.snmp import SNMPHostSections
+from cmk.base.api.agent_based.inventory_classes import Attributes, TableRow, InventoryResult
+from cmk.base.checkers import ABCSource, ABCHostSections
+from cmk.base.checkers.host_sections import HostKey, MultiHostSections
+from cmk.base.checkers.snmp import SNMPHostSections
 from cmk.base.discovered_labels import HostLabel
 
 #.
@@ -76,13 +80,13 @@ def do_inv(hostnames: List[HostName]) -> None:
                 config_cache,
                 host_config,
                 ipaddress,
-                sources=data_sources.make_sources(
+                sources=checkers.make_sources(
                     host_config,
                     ipaddress,
-                    mode=data_sources.Mode.INVENTORY,
+                    mode=checkers.Mode.INVENTORY,
                 ),
                 multi_host_sections=None,
-            )
+            )[:2]
             _run_inventory_export_hooks(host_config, inventory_tree)
             _show_inventory_results_on_console(inventory_tree, status_data_tree)
 
@@ -107,7 +111,7 @@ def _show_inventory_results_on_console(inventory_tree: StructuredDataTree,
                                                  "Check_MK HW/SW Inventory")
 def do_inv_check(
     hostname: HostName, options: Dict[str, int]
-) -> Tuple[ServiceState, List[ServiceDetails], List[ServiceAdditionalDetails], Metric]:
+) -> Tuple[ServiceState, List[ServiceDetails], List[ServiceAdditionalDetails], List[MetricTuple]]:
     _inv_hw_changes = options.get("hw-changes", 0)
     _inv_sw_changes = options.get("sw-changes", 0)
     _inv_sw_missing = options.get("sw-missing", 0)
@@ -123,10 +127,13 @@ def do_inv_check(
     status = 0
     infotexts: List[str] = []
     long_infotexts: List[str] = []
-    perfdata: List[Tuple] = []
 
-    sources = data_sources.make_sources(host_config, ipaddress, mode=data_sources.Mode.INVENTORY)
-    inventory_tree, status_data_tree = _do_inv_for(
+    sources = checkers.make_sources(
+        host_config,
+        ipaddress,
+        mode=checkers.Mode.INVENTORY,
+    )
+    inventory_tree, status_data_tree, results = _do_inv_for(
         config_cache,
         host_config,
         ipaddress,
@@ -176,8 +183,8 @@ def do_inv_check(
         if not status_data_tree.is_empty():
             infotexts.append("Found %s status entries" % status_data_tree.count_entries())
 
-    for source in sources:
-        source_state, source_output, _source_perfdata = source.get_summary_result()
+    for source, host_sections in results:
+        source_state, source_output, _source_perfdata = source.summarize(host_sections)
         if source_state != 0:
             # Do not output informational things (state == 0). Also do not use source states
             # which would overwrite "State when inventory fails" in the ruleset
@@ -186,7 +193,7 @@ def do_inv_check(
             status = max(_inv_fail_status, status)
             infotexts.append("[%s] %s" % (source.id, source_output))
 
-    return status, infotexts, long_infotexts, perfdata
+    return status, infotexts, long_infotexts, []
 
 
 def _all_sources_fail(
@@ -201,11 +208,14 @@ def _all_sources_fail(
     if host_config.is_cluster:
         return False
 
+    # TODO(ml): This function makes no sense and is no op anyway.
+    #           We could fix it by actually searching for errors in the sources
+    #           as it seems that it is what was meant initially.
     exceptions_by_source = {
-        source.configurator.id: source.exception() for source in data_sources.make_sources(
+        source.id: None for source in checkers.make_sources(
             host_config,
             ipaddress,
-            mode=data_sources.Mode.INVENTORY,
+            mode=checkers.Mode.INVENTORY,
         )
     }
     if "piggyback" in exceptions_by_source and not len(exceptions_by_source) == 1\
@@ -220,7 +230,7 @@ def do_inventory_actions_during_checking_for(
     host_config: config.HostConfig,
     ipaddress: Optional[HostAddress],
     *,
-    sources: data_sources.DataSources,
+    sources: Sequence[ABCSource],
     multi_host_sections: MultiHostSections,
 ) -> None:
     hostname = host_config.hostname
@@ -235,15 +245,16 @@ def do_inventory_actions_during_checking_for(
         ipaddress,
         sources=sources,
         multi_host_sections=multi_host_sections,
-    )
+    )[:2]
     _save_status_data_tree(hostname, status_data_tree)
 
 
 def _cleanup_status_data(hostname: HostName) -> None:
+    """Remove empty status data files"""
     filepath = "%s/%s" % (cmk.utils.paths.status_data_dir, hostname)
-    if os.path.exists(filepath):  # Remove empty status data files.
+    with suppress(OSError):
         os.remove(filepath)
-    if os.path.exists(filepath + ".gz"):
+    with suppress(OSError):
         os.remove(filepath + ".gz")
 
 
@@ -252,9 +263,10 @@ def _do_inv_for(
     host_config: config.HostConfig,
     ipaddress: Optional[HostAddress],
     *,
-    sources: data_sources.DataSources,
+    sources: Sequence[ABCSource],
     multi_host_sections: Optional[MultiHostSections],
-) -> Tuple[StructuredDataTree, StructuredDataTree]:
+) -> Tuple[StructuredDataTree, StructuredDataTree, Sequence[Tuple[ABCSource, Result[ABCHostSections,
+                                                                                    Exception]]]]:
     hostname = host_config.hostname
 
     initialize_inventory_tree()
@@ -262,12 +274,13 @@ def _do_inv_for(
     status_data_tree = StructuredDataTree()
 
     node = inventory_tree.get_dict("software.applications.check_mk.cluster.")
+    results: Sequence[Tuple[ABCSource, Result[ABCHostSections, Exception]]] = []
     if host_config.is_cluster:
         node["is_cluster"] = True
         _do_inv_for_cluster(host_config, inventory_tree)
     else:
         node["is_cluster"] = False
-        _do_inv_for_realhost(
+        results = _do_inv_for_realhost(
             config_cache,
             host_config,
             sources,
@@ -280,7 +293,7 @@ def _do_inv_for(
 
     inventory_tree.normalize_nodes()
     status_data_tree.normalize_nodes()
-    return inventory_tree, status_data_tree
+    return inventory_tree, status_data_tree, results
 
 
 def _do_inv_for_cluster(host_config: config.HostConfig, inventory_tree: StructuredDataTree) -> None:
@@ -297,22 +310,21 @@ def _do_inv_for_cluster(host_config: config.HostConfig, inventory_tree: Structur
 def _do_inv_for_realhost(
     config_cache: config.ConfigCache,
     host_config: config.HostConfig,
-    sources: data_sources.DataSources,
+    sources: Sequence[ABCSource],
     multi_host_sections: Optional[MultiHostSections],
     hostname: HostName,
     ipaddress: Optional[HostAddress],
     inventory_tree: StructuredDataTree,
     status_data_tree: StructuredDataTree,
-) -> None:
+) -> Sequence[Tuple[ABCSource, Result[ABCHostSections, Exception]]]:
+    results: List[Tuple[ABCSource, Result[ABCHostSections, Exception]]] = []
     for source in sources:
-        if isinstance(source, data_sources.snmp.SNMPDataSource):
+        if isinstance(source, checkers.snmp.SNMPSource):
             # TODO(ml): This modifies the SNMP fetcher config dynamically.
-            configurator = cast(data_sources.snmp.SNMPConfigurator, source.configurator)
-            configurator.on_snmp_scan_error = "raise"  # default
-            configurator.do_snmp_scan = True
-            data_sources.FileCacheConfigurator.snmp_disabled = True
-            configurator.use_snmpwalk_cache = False
-            configurator.ignore_check_interval = True
+            source.on_snmp_scan_error = "raise"  # default
+            checkers.FileCacheFactory.snmp_disabled = True
+            source.use_snmpwalk_cache = False
+            source.ignore_check_interval = True
             if multi_host_sections is not None:
                 # Status data inventory already provides filled multi_host_sections object.
                 # SNMP data source: If 'do_status_data_inv' is enabled there may be
@@ -322,24 +334,38 @@ def _do_inv_for_realhost(
                     #    hostname == source.hostname
                     #    ipaddress == source.ipaddress
                     # ?
-                    HostKey(hostname, ipaddress, source.configurator.source_type),
+                    HostKey(hostname, ipaddress, source.source_type),
                     SNMPHostSections(),
                 )
                 # TODO(ml): This modifies the SNMP fetcher config dynamically.
                 #           Can the fetcher handle that on its own?
-                configurator.prefetched_sections = host_sections.sections
-                host_sections.update(source.run(selected_raw_sections=None))
+                source.prefetched_sections = host_sections.sections
+
+                # When executing the structured status inventory, we are in the Mode.CHECKING
+                assert source.mode is Mode.INVENTORY or source.mode is Mode.CHECKING
+
+                host_section = source.parse(source.fetch())
+                results.append((source, host_section))
+                if host_section.is_ok():
+                    assert host_section.ok is not None
+                    host_sections.update(host_section.ok)
 
     if multi_host_sections is None:
-        multi_host_sections = data_sources.make_host_sections(
-            config_cache,
-            host_config,
-            ipaddress,
-            data_sources.Mode.INVENTORY,
-            sources,
+        multi_host_sections = MultiHostSections()
+        hs = checkers.update_host_sections(
+            multi_host_sections,
+            checkers.make_nodes(
+                config_cache,
+                host_config,
+                ipaddress,
+                checkers.Mode.INVENTORY,
+                sources,
+            ),
             max_cachefile_age=host_config.max_cachefile_age,
             selected_raw_sections=None,
+            host_config=host_config,
         )
+        results.extend(hs)
 
     section.section_step("Executing inventory plugins")
     console.verbose("Plugins:")
@@ -367,10 +393,11 @@ def _do_inv_for_realhost(
         )
 
     console.verbose("\n")
+    return results
 
 
 def _aggregate_inventory_results(
-    inventory_generator: InventoryGenerator,
+    inventory_generator: InventoryResult,
     inventory_tree: StructuredDataTree,
     status_data_tree: StructuredDataTree,
 ) -> None:
@@ -537,7 +564,7 @@ def _run_inventory_export_hooks(host_config: config.HostConfig,
 #   |                         |___/                                        |
 #   +----------------------------------------------------------------------+
 #   | Helper API for being used in inventory plugins. Plugins have access  |
-#   | to all things defined by the regular Check_MK check API and all the  |
+#   | to all things defined by the regular Checkmk check API and all the  |
 #   | things declared here.                                                |
 #   '----------------------------------------------------------------------'
 

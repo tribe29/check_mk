@@ -17,6 +17,8 @@ def test_registered_pages():
         'add_bookmark',
         'ajax_average_scatterplot_data',
         'ajax_alerts_bar_chart_dashlet',
+        'ajax_bi_rule_preview',
+        'ajax_bi_aggregation_preview',
         'ajax_notifications_bar_chart_dashlet',
         'ajax_cascading_render_painer_parameters',
         'ajax_activation_state',
@@ -53,9 +55,7 @@ def test_registered_pages():
         'ajax_fetch_topology',
         'ajax_get_all_bi_template_layouts',
         'automation_login',
-        'bi',
         'bi_map',
-        'bi_debug',
         'bi_render_tree',
         'bi_save_treestate',
         'bi_set_assumption',
@@ -133,6 +133,8 @@ def test_registered_pages():
         'ajax_graph',
         'ajax_graph_hover',
         'ajax_render_graph_content',
+        'ajax_initial_dashboard_filters',
+        'ajax_initial_view_filters',
     ]
 
     if not cmk_version.is_raw_edition():
@@ -182,15 +184,14 @@ def test_registered_pages():
             'report_thumbnail',
             'sla_configurations',
             'sla_details',
-            'ntop_interface_details',
+            'ntop_host_details',
             'ajax_ntop_interface_quickstats',
-            'ajax_ntop_interface_stats',
-            'ajax_ntop_interface_traffic',
+            'ajax_ntop_host_details',
+            'ajax_ntop_host_stats',
+            'ajax_ntop_host_traffic',
             'ajax_ntop_host_ports',
             'ajax_ntop_host_ports_painter',
-            'ajax_ntop_interface_details',
-            'ajax_ntop_protocol_breakdown',
-            'ajax_ntop_iface_ports_list',
+            'ajax_ntop_host_protocol_breakdown',
             'ajax_ntop_host_top_peers_protocols',
             'ajax_ntop_host_top_peers_protocols_painter',
             'ajax_ntop_host_top_peers_protocols_bar',
@@ -201,14 +202,22 @@ def test_registered_pages():
             'ajax_ntop_engaged_alerts',
             'ajax_ntop_past_alerts',
             'ajax_ntop_flow_alerts',
+            'license_usage_download',
         ]
 
     # TODO: Depending on how we call the test (single test or whole package) we
     # see this page or we don't...
-    actual = sorted(p  #
-                    for p in cmk.gui.pages.page_registry.keys()
-                    if p != "switch_customer")
-    assert actual == sorted(expected_pages)
+    actual_set = set(p  #
+                     for p in cmk.gui.pages.page_registry.keys()
+                     if p != "switch_customer")
+
+    expected_set = set(expected_pages)
+    differences = actual_set.symmetric_difference(expected_set)
+    if differences:
+        sys.stdout.write("Registered pages differ\n")
+        sys.stdout.write("Expected but missing: %s\n" % ", ".join(expected_set - actual_set))
+        sys.stdout.write("Unknown new pages: %s\n" % ", ".join(actual_set - expected_set))
+    assert len(differences) == 0
 
 
 def test_pages_register(monkeypatch, capsys):

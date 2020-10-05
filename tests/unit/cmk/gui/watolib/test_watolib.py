@@ -145,7 +145,6 @@ def test_registered_configvars():
         'retention_interval',
         'rrdcached_tuning',
         'rule_optimizer',
-        'save_user_access_times',
         'selection_livetime',
         'service_view_grouping',
         'show_livestatus_errors',
@@ -165,6 +164,7 @@ def test_registered_configvars():
         'staleness_threshold',
         'start_url',
         'statistics_interval',
+        'support_credentials',
         'table_row_limit',
         'tcp_connect_timeout',
         'topology_default_filter_group',
@@ -289,6 +289,7 @@ def test_registered_configvar_groups():
         u'Site Management',
         u'User Interface',
         u'User Management',
+        'Support',
     ]
 
     if not cmk_version.is_raw_edition():

@@ -3,7 +3,7 @@
 # This file is part of Checkmk (https://checkmk.com). It is subject to the terms and
 # conditions defined in the file COPYING, which is part of this source code package.
 
-# Check_MK agent plugin for monitoring ORACLE databases
+# Checkmk agent plugin for monitoring ORACLE databases
 # This plugin is a result of the common work of Thorsten Bruhns
 # and Mathias Kettner. Thorsten is responsible for the ORACLE
 # stuff, Mathias for the shell hacking...
@@ -2484,8 +2484,13 @@ mk_ora_db_connect () {
             # need to try both cases.
             # Important: This does not cover config variables that uses both
             # upper and lower case letters. We simply cannot handle that!
-            dummy_upper="DBUSER_${ORACLE_SID^^}"
-            dummy_lower="DBUSER_${ORACLE_SID,,}"
+            #
+            # Disabling shellcheck because false-positive warning regarding
+            # single quotes. AWK needs these single quotes to work as inteded.
+            # shellcheck disable=SC2016
+            dummy_upper="DBUSER_$(echo "$ORACLE_SID" | "$AWK" '{ print toupper($0) }')"
+            # shellcheck disable=SC2016
+            dummy_lower="DBUSER_$(echo "$ORACLE_SID" | "$AWK" '{ print tolower($0) }')"
             if [ "${!dummy_upper}" = '' ]; then
                 if [ "${!dummy_lower}" = '' ]; then
                     ORACFGLINE=${DBUSER}
@@ -2752,12 +2757,21 @@ fetch_custom_section_variable() {
     local section_name=$1
     local section_var=
     local section_dummy=
-    if declare -p "$1_${ORACLE_SID^^}" > /dev/null 2>&1; then
-        section_dummy="$1_${ORACLE_SID^^}"
+    local sid_upper=
+    local sid_lower=
+    # Disabling shellcheck because false-positive warning regarding
+    # single quotes. AWK needs these single quotes to work as inteded.
+    # shellcheck disable=SC2016
+    sid_upper=$(echo "$ORACLE_SID" | "$AWK" '{ print toupper($0) }')
+    # shellcheck disable=SC2016
+    sid_lower=$(echo "$ORACLE_SID" | "$AWK" '{ print tolower($0) }')
+
+    if declare -p "$1_${sid_upper}" > /dev/null 2>&1; then
+        section_dummy="$1_${sid_upper}"
         section_var=${!section_dummy}
     else
-        if declare -p "$1_${ORACLE_SID,,}" > /dev/null 2>&1; then
-            section_dummy="$1_${ORACLE_SID,,}"
+        if declare -p "$1_${sid_lower}" > /dev/null 2>&1; then
+            section_dummy="$1_${sid_lower}"
             section_var=${!section_dummy}
         else
             section_var="${!section_name}"
@@ -2911,7 +2925,7 @@ fi
 
 # If we do not have found any running database instance, then either
 # no ORACLE is present on this system or it's just currently not running.
-# In the later case we ouput empty agent sections so that Check_MK will be
+# In the later case we ouput empty agent sections so that Checkmk will be
 # happy and execute the actual check functions.
 if [ -z "$SIDS" ] && [ ! -e "$MK_VARDIR/mk_oracle.found" ]; then
     logging -c -e "[preliminaries]" "No SIDs and \$MK_VARDIR/mk_oracle.found not found"

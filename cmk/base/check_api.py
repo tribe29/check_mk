@@ -109,6 +109,7 @@ from cmk.utils.type_defs import EvalableFloat as as_float  # noqa: F401 # pylint
 from cmk.utils.type_defs import (
     HostName,
     MetricName,
+    Ruleset as _Ruleset,
     SectionName as _SectionName,
     ServiceCheckResult,
     ServiceDetails,
@@ -116,7 +117,6 @@ from cmk.utils.type_defs import (
     ServiceState,
 )
 
-import cmk.snmplib.utils as _snmp_utils
 from cmk.snmplib.type_defs import (  # noqa: F401 # pylint: disable=unused-import
     OID_BIN, OID_END, OID_END_BIN, OID_END_OCTET_STRING, OID_STRING, OIDBytes, OIDCached,
 )
@@ -171,8 +171,6 @@ core_state_names = _defines.short_service_state_names()
 # backwards compatibility: allow to pass integer.
 BINARY = lambda x: OIDBytes(str(x))
 CACHED_OID = lambda x: OIDCached(str(x))
-
-network_interface_scan_registry = _snmp_utils.MutexScanRegistry()
 
 
 def saveint(i: Any) -> int:
@@ -251,7 +249,7 @@ get_number_with_precision = render.fmt_number_with_precision
 quote_shell_string = _cmk_utils.quote_shell_string
 
 
-def get_checkgroup_parameters(group: str, deflt: Optional[str] = None) -> Optional[str]:
+def get_checkgroup_parameters(group: str, deflt: _Ruleset) -> _Ruleset:
     return _config.checkgroup_parameters.get(group, deflt)
 
 
@@ -576,10 +574,10 @@ def get_parsed_item_data(check_function: Callable) -> Callable:
         ...
 
     In case of parsed not being a dict the decorator returns 3
-    (UNKN state) with a wrong usage message.
+    (unknown state) with a wrong usage message.
     In case of item not existing as a key in parsed or parsed[item]
     not existing the decorator gives an empty return leading to
-    cmk.base returning 3 (UNKN state) with an item not found message
+    cmk.base returning 3 (unknown state) with an item not found message
     (see cmk/base/checking.py).
     """
     @functools.wraps(check_function)

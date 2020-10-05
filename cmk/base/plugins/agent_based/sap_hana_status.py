@@ -4,18 +4,20 @@
 # This file is part of Checkmk (https://checkmk.com). It is subject to the terms and
 # conditions defined in the file COPYING, which is part of this source code package.
 
+from typing import Dict
+
 from .utils import sap_hana
-from .agent_based_api.v0 import (
+from .agent_based_api.v1 import (
     register,
     Service,
     Result,
-    state,
+    State as state,
 )
 
-from .agent_based_api.v0.type_defs import (
-    DiscoveryGenerator,
+from .agent_based_api.v1.type_defs import (
+    DiscoveryResult,
     AgentStringTable,
-    CheckGenerator,
+    CheckResult,
 )
 
 
@@ -58,16 +60,17 @@ def _check_sap_hana_status_data(data):
     return cur_state, "Status: %s" % state_name
 
 
-def discovery_sap_hana_status(section: sap_hana.ParsedSection) -> DiscoveryGenerator:
+def discovery_sap_hana_status(section: sap_hana.ParsedSection) -> DiscoveryResult:
     for item in section:
         yield Service(item=item)
 
 
-def check_sap_hana_status(item: str, section: sap_hana.ParsedSection) -> CheckGenerator:
+def check_sap_hana_status(item: str, section: sap_hana.ParsedSection) -> CheckResult:
 
     data = section.get(item)
     if data is None:
         return
+
     if 'Status' in item:
         cur_state, infotext = _check_sap_hana_status_data(data)
         yield Result(state=cur_state, summary=infotext)
@@ -79,7 +82,10 @@ def check_sap_hana_status(item: str, section: sap_hana.ParsedSection) -> CheckGe
     return
 
 
-def cluster_check_sap_hana_status(item: str, section: sap_hana.ParsedSection) -> CheckGenerator:
+def cluster_check_sap_hana_status(
+    item: str,
+    section: Dict[str, sap_hana.ParsedSection],
+) -> CheckResult:
 
     yield Result(state=state.OK, summary='Nodes: %s' % ', '.join(section.keys()))
     for node_section in section.values():

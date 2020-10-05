@@ -33,11 +33,6 @@
   padding: 0;
   margin: 0 0 $spacing;
 
-  a.more {
-    position: absolute;
-    right: 0;
-  }
-
   #mk_side_search {
     width: 250px;
     padding: (2 * $spacing) $spacing;
@@ -88,6 +83,9 @@
       top: unset;
       height: 150px;
       margin-top: -150px;
+
+      div.navigation_bar { height: 0; }
+      div.content.inner { height: inherit; }
     }
 
     div.popup_menu {
@@ -96,8 +94,8 @@
       left: 64px;
       z-index: 1000;
       height: calc(100vh - #{$page-header-height});
-      background-color: $popup-menu-bg-color;
-      border-right: 4px solid $success;
+      background-color: $base-color;
+      border-right: $popup-border;
       border-left: 1px solid $headline-color;
       visibility: hidden;
 
@@ -112,12 +110,30 @@
         background-color: #383838;
       }
 
+      div.navigation_bar {
+        display: flex;
+        height: $megamenu-navbar-height;
+
+        div.search_bar {
+          flex-grow: 1;
+
+          + div {
+            position: relative;
+            padding: 21px 15px 0;
+            flex-basis: 78px;
+
+            a.more { float: right; }
+          }
+        }
+      }
+
       div.content.inner {
         display: flex;
         flex-flow: column wrap;
-        height: calc(100vh - #{$page-header-height});
+        height: calc(100vh - #{$page-header-height} - #{$megamenu-navbar-height});
         padding: 0;
         overflow-y: auto;
+        border-top: 1px solid $headline-color;
 
         div.topic {
           flex-grow: 1;
@@ -125,8 +141,6 @@
           padding: (2 * $spacing) (2 * $spacing) 0;
           border-right: 1px solid $headline-color;
           box-sizing: border-box;
-
-          &:last-child { flex-grow: 1000; }
 
           h2 {
             padding-bottom: 4px;
@@ -158,7 +172,7 @@
           }
 
           ul a:hover {
-            color: #13d288;
+            color: $success;
             text-decoration: none;
           }
 
@@ -189,7 +203,6 @@
               position: fixed;
               z-index: 5;
               padding-top: 22px;
-              background-color: rgb(53, 63, 74);
 
               a.show_all_topics img { display: block; }
             }
@@ -213,6 +226,10 @@
 
           &.extendable li.show_all_items { display: list-item; }
         }
+
+        div.sentinel {
+          flex-grow: 1000;
+        }
       }
 
       div.main_menu.extended_topic div.topic:not(.extended) { display: none; }
@@ -227,7 +244,7 @@
       z-index: 100;
       display: none;
       cursor: default;
-      background-color: rgba(0, 0, 0, 0.1);
+      background-color: $popup-shadow-color;
     }
 
     &.active {
@@ -244,6 +261,7 @@
 
     &:last-of-type {
       margin-top: auto;  // place the user menu at the bottom
+      margin-bottom: 10px;
     }
 
     a.popup_trigger {

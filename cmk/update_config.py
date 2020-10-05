@@ -35,10 +35,12 @@ from cmk.utils.exceptions import MKGeneralException
 import cmk.utils.paths
 import cmk.utils
 from cmk.utils.type_defs import CheckPluginName, UserId
+
 import cmk.gui.pagetypes as pagetypes
 import cmk.gui.visuals as visuals
 from cmk.gui.plugins.views.utils import get_all_views
 from cmk.gui.plugins.dashboard.utils import get_all_dashboards
+from cmk.gui.plugins.userdb.utils import save_connection_config, load_connection_config
 import cmk.gui.watolib.tags  # pylint: disable=cmk-module-layer-violation
 import cmk.gui.watolib.hosts_and_folders  # pylint: disable=cmk-module-layer-violation
 import cmk.gui.watolib.rulesets  # pylint: disable=cmk-module-layer-violation
@@ -51,6 +53,8 @@ from cmk.gui.http import Request  # pylint: disable=cmk-module-layer-violation
 
 import cmk.update_rrd_fs_names
 
+from cmk.gui.plugins.wato.check_parameters.diskstat import transform_diskstat
+
 # mapping removed check plugins to their replacement:
 REMOVED_CHECK_PLUGIN_MAP = {
     CheckPluginName("ps_perf"): CheckPluginName("ps"),
@@ -60,7 +64,10 @@ REMOVED_CHECK_PLUGIN_MAP = {
     CheckPluginName("solaris_mem"): CheckPluginName("mem_used"),
     CheckPluginName("statgrab_mem"): CheckPluginName("mem_used"),
     CheckPluginName("cisco_mem_asa64"): CheckPluginName("cisco_mem_asa"),
+    CheckPluginName("if64adm"): CheckPluginName("if64"),
 }
+
+WATO_RULESET_PARAM_TRANSFORMS = [('diskstat_inventory', transform_diskstat)]
 
 
 # TODO: Better make our application available?
@@ -104,6 +111,8 @@ class UpdateConfig:
                     step_func()
                 except Exception:
                     self._logger.log(VERBOSE, " + \"%s\" failed" % title, exc_info=True)
+                    if self._arguments.debug:
+                        raise
 
         self._logger.log(VERBOSE, "Done")
 
@@ -116,6 +125,7 @@ class UpdateConfig:
             (self._cleanup_version_specific_caches, "Cleanup version specific caches"),
             (self._update_fs_used_name, "Migrating fs_used name"),
             (self._migrate_pagetype_topics_to_ids, "Migrate pagetype topics"),
+            (self._add_missing_type_to_ldap_connections, "Migrate LDAP connections"),
         ]
 
     # FS_USED UPDATE DELETE THIS FOR CMK 1.8, THIS ONLY migrates 1.6->1.7
@@ -139,8 +149,10 @@ class UpdateConfig:
         # services due to an exception thrown by cmk.base.config.service_description
         # in _parse_autocheck_entry of cmk.base.autochecks.
         cmk.base.config.load()
-        cmk.base.config.load_all_checks(cmk.base.check_api.get_check_api_context)
+        cmk.base.config.load_all_agent_based_plugins(cmk.base.check_api.get_check_api_context)
         check_variables = cmk.base.config.get_check_variables()
+
+        failed_hosts: List[str] = []
         for autocheck_file in Path(cmk.utils.paths.autochecks_dir).glob("*.mk"):
             hostname = autocheck_file.stem
             try:
@@ -150,12 +162,22 @@ class UpdateConfig:
                     check_variables,
                 )
             except MKGeneralException as exc:
-                raise MKGeneralException(
-                    "%s\nIf you encounter this error during the update process "
-                    "you need to replace the the variable by its actual value, e.g. "
-                    "replace `my_custom_levels` by `{'levels': (23, 42)}`." % exc)
+                msg = ("%s\nIf you encounter this error during the update process "
+                       "you need to replace the the variable by its actual value, e.g. "
+                       "replace `my_custom_levels` by `{'levels': (23, 42)}`." % exc)
+                if self._arguments.debug:
+                    raise MKGeneralException(msg)
+                self._logger.error(msg)
+                failed_hosts.append(hostname)
+                continue
+
             autochecks = [self._map_removed_check_plugin_names(s) for s in autochecks]
             cmk.base.autochecks.save_autochecks_file(hostname, autochecks)
+
+        if failed_hosts:
+            msg = "Failed to rewrite autochecks file for hosts: %s" % ", ".join(failed_hosts)
+            self._logger.error(msg)
+            raise MKGeneralException(msg)
 
     def _map_removed_check_plugin_names(self, service: Service) -> Service:
         """Change names of removed plugins to the new ones"""
@@ -172,7 +194,21 @@ class UpdateConfig:
     def _rewrite_wato_rulesets(self):
         all_rulesets = cmk.gui.watolib.rulesets.AllRulesets()
         all_rulesets.load()
+
+        self._transform_wato_rulesets_params(all_rulesets, WATO_RULESET_PARAM_TRANSFORMS)
+
         all_rulesets.save()
+
+    def _transform_wato_rulesets_params(self, all_rulesets, transforms):
+        for param_name, transform_func in transforms:
+            try:
+                ruleset = all_rulesets.get(param_name)
+            except KeyError:
+                continue
+            rules = ruleset.get_rules()
+            for rule in rules:
+                transformed_params = transform_func(rule[2].value)
+                rule[2].value = transformed_params
 
     def _initialize_gui_environment(self):
         self._logger.log(VERBOSE, "Loading GUI plugins...")
@@ -283,7 +319,7 @@ class UpdateConfig:
             reporting.load_reports()
             topic_created_for.update(
                 self._migrate_visuals_topics(topics,
-                                             visual_type="dashboards",
+                                             visual_type="reports",
                                              all_visuals=reporting.reports))
 
         return topic_created_for
@@ -360,6 +396,19 @@ class UpdateConfig:
 
         spec["topic"] = name
         return True, True
+
+    def _add_missing_type_to_ldap_connections(self):
+        """Each user connections needs to declare it's connection type.
+
+        This is done using the "type" attribute. Previous versions did not always set this
+        attribute, which is corrected with this update method."""
+        connections = load_connection_config()
+        if not connections:
+            return
+
+        for connection in connections:
+            connection.setdefault("type", "ldap")
+        save_connection_config(connections)
 
 
 def _id_from_title(title):

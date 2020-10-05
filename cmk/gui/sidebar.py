@@ -20,7 +20,6 @@ from cmk.gui.globals import html
 from cmk.gui.htmllib import HTML
 import cmk.gui.utils as utils
 import cmk.gui.config as config
-import cmk.gui.userdb as userdb
 import cmk.gui.pagetypes as pagetypes
 import cmk.gui.notify as notify
 import cmk.gui.werks as werks
@@ -81,12 +80,12 @@ def load_plugins(force):
     loaded_with_language = cmk.gui.i18n.get_current_language()
 
 
-# Pre Check_MK 1.5 the snapins were declared with dictionaries like this:
+# Pre Checkmk 1.5 the snapins were declared with dictionaries like this:
 #
 # sidebar_snapins["about"] = {
-#     "title" : _("About Check_MK"),
+#     "title" : _("About Checkmk"),
 #     "description" : _("Version information and Links to Documentation, "
-#                       "Homepage and Download of Check_MK"),
+#                       "Homepage and Download of Checkmk"),
 #     "render" : render_about,
 #     "allowed" : [ "admin", "user", "guest" ],
 # }
@@ -382,7 +381,7 @@ class SidebarRenderer:
                 continue
 
             html.open_a(href=item.url, target=item.target_name)
-            html.icon(title=None, icon=item.icon_name)
+            html.icon(item.icon_name)
             html.div(item.title)
             html.close_a()
         html.close_div()
@@ -413,7 +412,7 @@ class SidebarRenderer:
         html.open_div(id_="add_snapin")
         html.open_a(href=html.makeuri_contextless([], filename="sidebar_add_snapin.py"),
                     target="main")
-        html.icon(title=_("Add snapins to your sidebar"), icon="add")
+        html.icon("add", title=_("Add snapins to your sidebar"))
         html.close_a()
         html.close_div()
 
@@ -655,11 +654,6 @@ def page_side():
 def ajax_snapin():
     """Renders and returns the contents of the requested sidebar snapin(s) in JSON format"""
     html.set_output_format("json")
-    # Update online state of the user (if enabled)
-    if config.user.id is None:
-        raise Exception("no user ID")
-    userdb.update_user_access_time(config.user.id)
-
     user_config = UserSidebarConfig(config.user, config.sidebar)
 
     snapin_id = html.request.var("name")
@@ -808,6 +802,10 @@ class CustomSnapins(pagetypes.Overridable):
         return "custom_snapin"
 
     @classmethod
+    def type_icon(cls):
+        return "custom_snapin"
+
+    @classmethod
     def type_is_advanced(cls) -> bool:
         return True
 
@@ -878,7 +876,7 @@ def page_add_snapin() -> None:
         raise MKGeneralException(_("You are not allowed to change the sidebar."))
 
     title = _("Available snapins")
-    breadcrumb = make_simple_page_breadcrumb(mega_menu_registry.menu_configure(), title)
+    breadcrumb = make_simple_page_breadcrumb(mega_menu_registry.menu_customize(), title)
     html.header(title, breadcrumb, _add_snapins_page_menu(breadcrumb))
 
     used_snapins = _used_snapins()

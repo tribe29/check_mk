@@ -23,7 +23,7 @@ import cmk.base.api.agent_based.register as agent_based_register
 
 from cmk.base import config
 from cmk.base import check_table
-from cmk.base.api.agent_based.type_defs import CheckPlugin
+from cmk.base.api.agent_based.checking_classes import CheckPlugin
 from cmk.base.check_utils import Service
 
 
@@ -355,7 +355,11 @@ def test_get_sorted_check_table_cmc(monkeypatch, service_list):
                         lambda *a, **kw: {s.id(): s for s in service_list})
 
     # all arguments are ignored in test
-    sorted_service_list = check_table.get_sorted_service_list("", True, None, True)
+    sorted_service_list = check_table.get_sorted_service_list(
+        "",
+        filter_mode=None,
+        skip_ignored=True,
+    )
     assert sorted_service_list == sorted(service_list, key=lambda s: s.description)
 
 
@@ -371,7 +375,11 @@ def test_get_sorted_check_table_no_cmc(monkeypatch, service_list):
         }.get(descr, []))
 
     # all arguments are ignored in test
-    sorted_service_list = check_table.get_sorted_service_list("", True, None, True)
+    sorted_service_list = check_table.get_sorted_service_list(
+        "",
+        filter_mode=None,
+        skip_ignored=True,
+    )
     assert [s.description for s in sorted_service_list] == [
         "description C",  #
         "description E",  # no deps, alphabetical order
@@ -398,7 +406,11 @@ def test_get_sorted_check_table_cyclic(monkeypatch, service_list):
                            "Cyclic service dependency of host MyHost. Problematic are:"
                            " 'description A' (plugin_A / item), 'description B' (plugin_B / item),"
                            " 'description D' (plugin_D / item)")):
-        _ = check_table.get_sorted_service_list("MyHost", True, None, True)
+        _ = check_table.get_sorted_service_list(
+            "MyHost",
+            filter_mode=None,
+            skip_ignored=True,
+        )
 
 
 @pytest.mark.parametrize("check_group_parameters", [
@@ -445,8 +457,8 @@ def test_check_table__get_static_check_entries(monkeypatch, check_group_paramete
 
     host_config = config_cache.get_host_config(hostname)
     static_check_parameters = [
-        service.parameters for service in check_table.HostCheckTable(
-            config_cache, host_config)._get_static_check_entries(host_config)
+        service.parameters
+        for service in check_table.HostCheckTable._get_static_check_entries(host_config)
     ]
 
     entries = config._get_checkgroup_parameters(

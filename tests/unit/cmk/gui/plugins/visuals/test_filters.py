@@ -34,8 +34,7 @@ def test_filters_filter_with_empty_request(register_builtin_html, filter_ident):
     with html.stashed_vars():
         html.request.del_vars()
 
-        # FIXME: register instances in filter_registry (CMK-5137)
-        filt = cmk.gui.plugins.visuals.utils.filter_registry[filter_ident]()  # type: ignore[call-arg]
+        filt = cmk.gui.plugins.visuals.utils.filter_registry[filter_ident]
         assert filt.filter(infoname="bla") == expected_filter
 
 
@@ -277,7 +276,7 @@ filter_tests = [
             "Filter: host_tags != 'address_family' 'no-ip4'\n"
         ),
     ),
-    # Testing base class FilterUnicode
+    # Testing base class FilterText
     FilterTest(
         ident="hostalias",
         request_vars=[('hostalias', "häääa")],
@@ -515,8 +514,7 @@ def test_filters_filter(register_builtin_html, test, monkeypatch):
         for key, val in test.request_vars:
             html.request.set_var(key, val)
 
-        # FIXME: register instances in filter_registry (CMK-5137)
-        filt = cmk.gui.plugins.visuals.utils.filter_registry[test.ident]()  # type: ignore[call-arg]
+        filt = cmk.gui.plugins.visuals.utils.filter_registry[test.ident]
         assert filt.filter(infoname="bla") == test.expected_filters
 
 FilterTableTest = namedtuple("FilterTableTest", [
@@ -546,7 +544,7 @@ filter_table_tests = [
             {"aggr_assumed_state": {"state": 1}},
         ],
     ),
-    # Testing base class FilterUnicodeFilter
+    # Testing base class Filter
     FilterTableTest(
         ident="aggr_group",
         request_vars=[('aggr_group', 'blä')],
@@ -1016,8 +1014,7 @@ def test_filters_filter_table(register_builtin_html, test, monkeypatch):
 
         # TODO: Fix this for real...
         if not cmk_version.is_raw_edition or test.ident != "deployment_has_agent":
-            # FIXME: register instances in filter_registry (CMK-5137)
-            filt = cmk.gui.plugins.visuals.utils.filter_registry[test.ident]()  # type: ignore[call-arg]
+            filt = cmk.gui.plugins.visuals.utils.filter_registry[test.ident]
             assert filt.filter_table(test.rows) == test.expected_rows
 
 
@@ -1026,8 +1023,6 @@ def test_filters_display_with_empty_request(register_builtin_html):
     with html.stashed_vars():
         html.request.del_vars()
 
-        for filter_class in cmk.gui.plugins.visuals.utils.filter_registry.values():
-            # FIXME: register instances in filter_registry (CMK-5137)
-            filt = filter_class()  # type: ignore[call-arg]
+        for filt in cmk.gui.plugins.visuals.utils.filter_registry.values():
             with html.plugged():
                 filt.display()

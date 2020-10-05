@@ -63,10 +63,12 @@ from cmk.gui.exceptions import (
     MKGeneralException,
     MKAuthException,
 )
+from cmk.gui.default_permissions import PermissionSectionGeneral
 from cmk.gui.permissions import (
+    permission_section_registry,
     permission_registry,
     declare_permission_section,
-    declare_permission,
+    Permission,
 )
 from cmk.gui.breadcrumb import (
     make_main_menu_breadcrumb,
@@ -302,6 +304,14 @@ class Base:
     @classmethod
     def type_name(cls) -> str:
         raise NotImplementedError()
+
+    @classmethod
+    def type_icon(cls) -> str:
+        raise NotImplementedError()
+
+    @classmethod
+    def type_emblem(cls) -> _Optional[str]:
+        return None
 
     # Lädt alle Dinge vom aktuellen User-Homeverzeichnis und
     # mergt diese mit den übergebenen eingebauten
@@ -641,13 +651,6 @@ class Overridable(Base):
         return None  # where redirect after a create should go
 
     @classmethod
-    def context_button_list(cls):
-        html.context_button(cls.phrase("title_plural"), cls.list_url(), cls.type_name())
-
-    def context_button_edit(self):
-        html.context_button(_("Edit"), self.edit_url(), "edit")
-
-    @classmethod
     def page_menu_entry_list(cls) -> Iterator[PageMenuEntry]:
         yield PageMenuEntry(
             title=cls.phrase("title_plural"),
@@ -669,59 +672,77 @@ class Overridable(Base):
     def declare_overriding_permissions(cls):
         declare_permission_section(cls.type_name(), cls.phrase("title_plural"), do_sort=True)
 
-        declare_permission(
-            "general.edit_" + cls.type_name(),
-            _("Customize %s and use them") % cls.phrase("title_plural"),
-            _("Allows to create own %s, customize builtin %s and use them.") %
-            (cls.phrase("title_plural"), cls.phrase("title_plural")),
-            ["admin", "user"],
-        )
+        permission_registry.register(
+            Permission(
+                section=PermissionSectionGeneral,
+                name="edit_" + cls.type_name(),
+                title=_l("Customize %s and use them") % cls.phrase("title_plural"),
+                description=_l("Allows to create own %s, customize builtin %s and use them.") %
+                (cls.phrase("title_plural"), cls.phrase("title_plural")),
+                defaults=["admin", "user"],
+            ))
 
-        declare_permission(
-            "general.publish_" + cls.type_name(),
-            _("Publish %s") % cls.phrase("title_plural"),
-            _("Make %s visible and usable for other users.") % cls.phrase("title_plural"),
-            ["admin", "user"],
-        )
+        permission_registry.register(
+            Permission(
+                section=PermissionSectionGeneral,
+                name="publish_" + cls.type_name(),
+                title=_l("Publish %s") % cls.phrase("title_plural"),
+                description=_l("Make %s visible and usable for other users.") %
+                cls.phrase("title_plural"),
+                defaults=["admin", "user"],
+            ))
 
-        config.declare_permission(
-            "general.publish_to_foreign_groups_" + cls.type_name(),
-            _("Publish %s to foreign contact groups") % cls.phrase("title_plural"),
-            _("Make %s visible and usable for users of contact groups the publishing user is not a member of."
-             ) % cls.phrase("title_plural"),
-            ["admin"],
-        )
+        permission_registry.register(
+            Permission(
+                section=PermissionSectionGeneral,
+                name="publish_to_foreign_groups_" + cls.type_name(),
+                title=_l("Publish %s to foreign contact groups") % cls.phrase("title_plural"),
+                description=_l(
+                    "Make %s visible and usable for users of contact groups the publishing user is not a member of."
+                ) % cls.phrase("title_plural"),
+                defaults=["admin"],
+            ))
 
         # TODO: Bug: This permission does not seem to be used
-        declare_permission(
-            "general.see_user_" + cls.type_name(),
-            _("See user %s") % cls.phrase("title_plural"),
-            _("Is needed for seeing %s that other users have created.") %
-            cls.phrase("title_plural"),
-            ["admin", "user", "guest"],
-        )
+        permission_registry.register(
+            Permission(
+                section=PermissionSectionGeneral,
+                name="see_user_" + cls.type_name(),
+                title=_l("See user %s") % cls.phrase("title_plural"),
+                description=_l("Is needed for seeing %s that other users have created.") %
+                cls.phrase("title_plural"),
+                defaults=["admin", "user", "guest"],
+            ))
 
-        declare_permission(
-            "general.force_" + cls.type_name(),
-            _("Modify builtin %s") % cls.phrase("title_plural"),
-            _("Make own published %s override builtin %s for all users.") %
-            (cls.phrase("title_plural"), cls.phrase("title_plural")),
-            ["admin"],
-        )
+        permission_registry.register(
+            Permission(
+                section=PermissionSectionGeneral,
+                name="force_" + cls.type_name(),
+                title=_l("Modify builtin %s") % cls.phrase("title_plural"),
+                description=_l("Make own published %s override builtin %s for all users.") %
+                (cls.phrase("title_plural"), cls.phrase("title_plural")),
+                defaults=["admin"],
+            ))
 
-        declare_permission(
-            "general.edit_foreign_" + cls.type_name(),
-            _("Edit foreign %s") % cls.phrase("title_plural"),
-            _("Allows to edit %s created by other users.") % cls.phrase("title_plural"),
-            ["admin"],
-        )
+        permission_registry.register(
+            Permission(
+                section=PermissionSectionGeneral,
+                name="edit_foreign_" + cls.type_name(),
+                title=_l("Edit foreign %s") % cls.phrase("title_plural"),
+                description=_("Allows to edit %s created by other users.") %
+                cls.phrase("title_plural"),
+                defaults=["admin"],
+            ))
 
-        declare_permission(
-            "general.delete_foreign_" + cls.type_name(),
-            _("Delete foreign %s") % cls.phrase("title_plural"),
-            _("Allows to delete %s created by other users.") % cls.phrase("title_plural"),
-            ["admin"],
-        )
+        permission_registry.register(
+            Permission(
+                section=PermissionSectionGeneral,
+                name="delete_foreign_" + cls.type_name(),
+                title=_l("Delete foreign %s") % cls.phrase("title_plural"),
+                description=_l("Allows to delete %s created by other users.") %
+                cls.phrase("title_plural"),
+                defaults=["admin"],
+            ))
 
     @classmethod
     def has_overriding_permission(cls, how):
@@ -898,8 +919,14 @@ class Overridable(Base):
     def declare_permission(cls, page):
         permname = "%s.%s" % (cls.type_name(), page.name())
         if page.is_public() and permname not in permission_registry:
-            declare_permission(permname, page.title(), page.description(),
-                               ['admin', 'user', 'guest'])
+            permission_registry.register(
+                Permission(
+                    section=permission_section_registry[cls.type_name()],
+                    name=page.name(),
+                    title=page.title(),
+                    description=page.description(),
+                    defaults=['admin', 'user', 'guest'],
+                ))
 
     @classmethod
     def custom_list_buttons(cls, instance):
@@ -907,7 +934,7 @@ class Overridable(Base):
 
     @classmethod
     def breadcrumb(cls, title: str, page_name: str) -> Breadcrumb:
-        breadcrumb = make_main_menu_breadcrumb(mega_menu_registry.menu_configure())
+        breadcrumb = make_main_menu_breadcrumb(mega_menu_registry.menu_customize())
 
         breadcrumb.append(BreadcrumbItem(title=cls.phrase("title_plural"), url=cls.list_url()))
 
@@ -939,7 +966,7 @@ class Overridable(Base):
                     entries=[
                         PageMenuEntry(
                             title=cls.phrase("new"),
-                            icon_name="new_%s" % cls.type_name(),
+                            icon_name="new",
                             item=make_simple_link(cls.create_url()),
                             is_shortcut=True,
                             is_suggested=True,
@@ -1032,7 +1059,7 @@ class Overridable(Base):
 
                     # View
                     if isinstance(instance, PageRenderer):
-                        html.icon_button(instance.page_url(), _("View"), "new_" + cls.type_name())
+                        html.icon_button(instance.page_url(), _("View"), cls.type_name())
 
                     # Clone / Customize
                     html.icon_button(instance.clone_url(), _("Create a customized copy of this"),
@@ -1646,6 +1673,10 @@ class PagetypeTopics(Overridable):
         return "pagetype_topic"
 
     @classmethod
+    def type_icon(cls):
+        return "pagetype_topic"
+
+    @classmethod
     def phrase(cls, phrase):
         return {
             "title": _("Topic"),
@@ -1665,12 +1696,10 @@ class PagetypeTopics(Overridable):
                 _("Topic"),
                 [
                     # sort-index, key, valuespec
-                    (2.5, "icon_name",
-                     IconSelector(
-                         title=_("Icon"),
-                         show_builtin_icons=True,
-                         allow_empty=False,
-                     )),
+                    (2.5, "icon_name", IconSelector(
+                        title=_("Icon"),
+                        allow_empty=False,
+                    )),
                     (2.5, "sort_index",
                      Integer(
                          title=_("Sort index"),
@@ -1793,9 +1822,8 @@ declare(PagetypeTopics)
 #.
 
 
-def _configure_menu_topics() -> List[TopicMenuTopic]:
+def _customize_menu_topics() -> List[TopicMenuTopic]:
     general_items = []
-
     monitoring_items = [
         TopicMenuItem(
             name="views",
@@ -1804,6 +1832,7 @@ def _configure_menu_topics() -> List[TopicMenuTopic]:
             sort_index=10,
             is_advanced=False,
             icon_name="view",
+            emblem=None,
         ),
         TopicMenuItem(
             name="dashboards",
@@ -1812,18 +1841,19 @@ def _configure_menu_topics() -> List[TopicMenuTopic]:
             sort_index=20,
             is_advanced=False,
             icon_name="dashboard",
-        ),
-        TopicMenuItem(
-            name="reports",
-            title=_("Reports"),
-            url="edit_reports.py",
-            sort_index=30,
-            is_advanced=True,
-            icon_name="report",
+            emblem=None,
         ),
     ]
-
     graph_items = []
+    business_reporting_items = [
+        TopicMenuItem(name="reports",
+                      title=_("Reports"),
+                      url="edit_reports.py",
+                      sort_index=10,
+                      is_advanced=True,
+                      icon_name="report",
+                      emblem=None),
+    ]
 
     for index, page_type_ in enumerate(all_page_types().values()):
         item = TopicMenuItem(
@@ -1832,11 +1862,14 @@ def _configure_menu_topics() -> List[TopicMenuTopic]:
             url="%ss.py" % page_type_.type_name(),
             sort_index=40 + (index * 10),
             is_advanced=page_type_.type_is_advanced(),
-            icon_name=page_type_.type_name(),
+            icon_name=page_type_.type_icon(),
+            emblem=page_type_.type_emblem(),
         )
 
         if page_type_.type_name() in ("pagetype_topic", "bookmark_list", "custom_snapin"):
             general_items.append(item)
+        elif page_type_.type_name() == "sla_configuration":
+            business_reporting_items.append(item)
         elif "graph" in page_type_.type_name():
             graph_items.append(item)
         else:
@@ -1860,15 +1893,21 @@ def _configure_menu_topics() -> List[TopicMenuTopic]:
             title=_("Graphs"),
             icon_name="topic_graphs",
             items=graph_items,
+        ),
+        TopicMenuTopic(
+            name="business_reporting",
+            title=_("Business reporting"),
+            icon_name="topic_reporting",
+            items=business_reporting_items,
         )
     ]
 
 
 mega_menu_registry.register(
     MegaMenu(
-        name="configure",
-        title=_l("Configure"),
-        icon_name="main_configure",
+        name="customize",
+        title=_l("Customize"),
+        icon_name="main_customize",
         sort_index=10,
-        topics=_configure_menu_topics,
+        topics=_customize_menu_topics,
     ))

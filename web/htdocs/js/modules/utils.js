@@ -7,6 +7,8 @@ import SimpleBar from "simplebar";
 import * as ajax from "ajax";
 import * as selection from "selection";
 
+let g_content_scrollbar = null;
+
 export const browser = {
     agent: navigator.userAgent.toLowerCase(),
     is_opera: function() { return this.agent.indexOf("opera") != -1; },
@@ -77,6 +79,12 @@ export function execute_javascript_by_object(obj)
 export function is_window_active()
 {
     return !has_class(document.body, "hidden");
+}
+
+// Predicate analogous to that used in JQuery to check whether an element is visible:
+// https://github.com/jquery/jquery/blob/master/src/css/hiddenVisibleSelectors.js
+export function is_visible(elem) {
+    return !!(elem.offsetWidth || elem.offsetHeight || elem.getClientRects().length);
 }
 
 export function has_class(o, cn) {
@@ -290,6 +298,35 @@ export function makeuri_contextless(vars, filename)
 
     return filename + "?" + params.join("&");
 }
+
+// Changes a parameter in the current pages URL without reloading the page
+export function update_url_parameter(name, value)
+{
+    // Only a solution for browsers with history.replaceState support. Sadly we have no
+    // F5/reload fix for others...
+    if (!window.history.replaceState)
+        return;
+
+    // Handle two cases:
+    // a) The page is opened without navigation:
+    // http://[HOST]/[SITE]/check_mk/dashboard.py?name=main&edit=1
+    // b) The page is opened with the navigation (within an iframe):
+    // http://[HOST]/[SITE]/check_mk/index.py?start_url=%2F[SITE]%2Fcheck_mk%2Fdashboard.py%3Fname%3Dmain&edit=1
+    // The URL computation needs to deal with both cases
+    const url = window.location.href;
+    let new_url;
+    if (url.indexOf("start_url") !== -1) {
+        var frame_url = decodeURIComponent(get_url_param("start_url", url));
+        frame_url = makeuri({[name]: value}, frame_url);
+        new_url = makeuri({"start_url": frame_url}, url);
+    }
+    else {
+        new_url = makeuri({[name]: value}, url);
+    }
+
+    window.history.replaceState({}, window.document.title, new_url);
+}
+
 
 // Returns timestamp in seconds incl. subseconds as decimal
 export function time() {
@@ -564,5 +601,15 @@ export function toggle_more(trigger, toggle_id, dom_levels_up) {
 }
 
 export function add_simplebar_scrollbar(scrollable_id) {
-    return new SimpleBar(document.getElementById(scrollable_id));
+    return add_simplebar_scrollbar_to_object(document.getElementById(scrollable_id));
+}
+
+export function add_simplebar_scrollbar_to_object(obj) {
+    return new SimpleBar(obj);
+}
+
+export function content_scrollbar(scrollable_id) {
+    if (g_content_scrollbar === null)
+        g_content_scrollbar = add_simplebar_scrollbar(scrollable_id);
+    return g_content_scrollbar;
 }

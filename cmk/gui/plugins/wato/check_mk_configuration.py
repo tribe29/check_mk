@@ -4,6 +4,7 @@
 # This file is part of Checkmk (https://checkmk.com). It is subject to the terms and
 # conditions defined in the file COPYING, which is part of this source code package.
 
+import collections
 import re
 import logging
 from typing import Dict, List, Tuple as _Tuple, Any
@@ -23,7 +24,6 @@ from cmk.gui.valuespec import (
     Dictionary,
     TextAscii,
     TextUnicode,
-    HTTPUrl,
     DropdownChoice,
     Tuple,
     ListOf,
@@ -86,7 +86,11 @@ from cmk.gui.plugins.wato import (
 
 from cmk.gui.plugins.views.icons import icon_and_action_registry
 from cmk.gui.plugins.wato.omd_configuration import ConfigVariableGroupSiteManagement
-from cmk.gui.plugins.wato.utils import get_section_information
+from cmk.gui.plugins.wato.utils import (
+    get_section_information,
+    RulespecGroupMonitoringConfiguration,
+    RulespecGroupDiscoveryCheckParameters,
+)
 from cmk.gui.watolib.bulk_discovery import vs_bulk_discovery
 from cmk.gui.watolib.groups import load_contact_group_information
 
@@ -125,7 +129,7 @@ class ConfigVariableUITheme(ConfigVariable):
     def valuespec(self):
         return DropdownChoice(
             title=_("User interface theme"),
-            help=_("Change the default user interface theme of your Check_MK installation"),
+            help=_("Change the default user interface theme of your Checkmk installation"),
             choices=config.theme_choices(),
         )
 
@@ -180,7 +184,7 @@ class ConfigVariableLogLevels(ConfigVariable):
                "about compiling BI aggregations. This includes statistics and "
                "details for each executed compilation.")),
             ("cmk.web.automations", _("Automation calls"),
-             _("Communication between different components of Check_MK (e.g. GUI and check engine) "
+             _("Communication between different components of Checkmk (e.g. GUI and check engine) "
                "will be logged in this log level.")),
             ("cmk.web.background-job", _("Background jobs"),
              _("Some long running tasks are executed as executed in so called background jobs. You "
@@ -588,51 +592,13 @@ class ConfigVariableEscapePluginOutput(ConfigVariable):
                    "code received from external sources, like plugin output or log messages. "
                    "If you are really sure what you are doing and need to have HTML codes, like "
                    "links rendered, disable this option. Be aware, you might open the way "
-                   "for several injection attacks.") +
-            _("This setting can either be set globally or individually for selected hosts "
-              "or services using the host or service rulesets."),
+                   "for several injection attacks. ") +
+            _("Instead of disabling this option globally it is highly recommended to "
+              "disable the escaping selectively for individual hosts and services with "
+              "the rulesets \"Escape HTML codes in host output\" and \"Escape HTML codes in "
+              "service output\". The rulesets have the additional advantage that the "
+              "configured value is accessible in the notification context."),
             label=_("Prevent loading HTML from plugin output or log messages"),
-        )
-
-
-@config_variable_registry.register
-class ConfigVariableCrashReportURL(ConfigVariable):
-    def group(self):
-        return ConfigVariableGroupUserInterface
-
-    def domain(self):
-        return ConfigDomainGUI
-
-    def ident(self):
-        return "crash_report_url"
-
-    def valuespec(self):
-        return HTTPUrl(
-            title=_("Crash report HTTP URL"),
-            help=_("By default crash reports will be sent to our crash reporting server."),
-            show_as_link=False,
-        )
-
-
-@config_variable_registry.register
-class ConfigVariableCrashReportTarget(ConfigVariable):
-    def group(self):
-        return ConfigVariableGroupUserInterface
-
-    def domain(self):
-        return ConfigDomainGUI
-
-    def ident(self):
-        return "crash_report_target"
-
-    def valuespec(self):
-        return TextAscii(
-            title=_("Crash report fallback mail address"),
-            help=_("By default crash reports will be sent to our crash reporting server. In case "
-                   "this fails for some reason, the crash reports can be sent by mail to the "
-                   "address configured here."),
-            size=80,
-            attrencode=True,
         )
 
 
@@ -814,7 +780,7 @@ class ConfigVariableSidebarShowVersionInSidebar(ConfigVariable):
 
     def valuespec(self):
         return Checkbox(
-            title=_("Show Check_MK edition & version in sidebar"),
+            title=_("Show Checkmk edition & version in sidebar"),
             label=_("Show the edition ad version"),
             help=_("Use this option to hide the Check_MK edition and version information from "
                    "the header of the sidebar."),
@@ -995,8 +961,8 @@ class ConfigVariableLoginScreen(ConfigVariable):
                 ("hide_version",
                  FixedValue(
                      True,
-                     title=_("Hide Check_MK version"),
-                     totext=_("Hide the Check_MK version from the login box"),
+                     title=_("Hide Checkmk version"),
+                     totext=_("Hide the Checkmk version from the login box"),
                  )),
                 ("login_message",
                  TextUnicode(
@@ -1240,22 +1206,6 @@ class ConfigVariableCustomServiceAttributes(ConfigVariable):
 
 
 @rulespec_group_registry.register
-class RulespecGroupMonitoringConfiguration(RulespecGroup):
-    @property
-    def name(self):
-        return "monconf"
-
-    @property
-    def title(self):
-        return _("Service monitoring rules")
-
-    @property
-    def help(self):
-        return _(
-            "Intervals for checking, retries, clustering, configuration for discovery and similar")
-
-
-@rulespec_group_registry.register
 class RulespecGroupHostsMonitoringRules(RulespecGroup):
     @property
     def name(self):
@@ -1267,7 +1217,7 @@ class RulespecGroupHostsMonitoringRules(RulespecGroup):
 
     @property
     def help(self):
-        return _("Configure the monitoring behaviour of hosts")
+        return _("Rules to configure the behaviour of monitored hosts.")
 
 
 @rulespec_group_registry.register
@@ -1304,31 +1254,6 @@ def _custom_service_attributes_custom_service_attribute_choices():
     return sorted(choices, key=lambda x: x[1])
 
 
-def _valuespec_custom_service_attributes():
-    return ListOf(
-        CascadingDropdown(
-            choices=_custom_service_attributes_custom_service_attribute_choices(),
-            orientation="horizontal",
-        ),
-        title=_("Custom service attributes"),
-        help=_("Use this ruleset to assign <a href=\"%s\">%s</a> to services.") %
-        ("wato.py?mode=edit_configvar&varname=custom_service_attributes",
-         _("Custom service attributes")),
-        allow_empty=False,
-        validate=_custom_service_attributes_validate_unique_entries,
-    )
-
-
-rulespec_registry.register(
-    ServiceRulespec(
-        group=RulespecGroupMonitoringConfigurationServiceChecks,
-        item_type="service",
-        match_type="all",
-        name="custom_service_attributes",
-        valuespec=_valuespec_custom_service_attributes,
-    ))
-
-
 def _service_tag_rules_validate_unique_entries(value, varprefix):
     seen_ids = []
     for entry in value:
@@ -1345,49 +1270,6 @@ def _service_tag_rules_tag_group_choices():
     return sorted(choices, key=lambda x: x[1])
 
 
-def _valuespec_service_tag_rules():
-    return ListOf(
-        CascadingDropdown(
-            choices=_service_tag_rules_tag_group_choices(),
-            orientation="horizontal",
-        ),
-        title=_("Service tags"),
-        help=_("Use this ruleset to assign <a href=\"%s\">%s</a> to services.") %
-        ("wato.py?mode=tags", _("Tags")),
-        allow_empty=False,
-        validate=_service_tag_rules_validate_unique_entries,
-    )
-
-
-rulespec_registry.register(
-    ServiceRulespec(
-        group=RulespecGroupMonitoringConfigurationServiceChecks,
-        item_type="service",
-        match_type="all",
-        name="service_tag_rules",
-        valuespec=_valuespec_service_tag_rules,
-    ))
-
-
-def _valuespec_service_label_rules():
-    return Labels(
-        world=Labels.World.CONFIG,
-        label_source=Labels.Source.RULESET,
-        title=_("Service labels"),
-        help=_("Use this ruleset to assign labels to service of your choice."),
-    )
-
-
-rulespec_registry.register(
-    ServiceRulespec(
-        group=RulespecGroupMonitoringConfigurationServiceChecks,
-        item_type="service",
-        match_type="dict",
-        name="service_label_rules",
-        valuespec=_valuespec_service_label_rules,
-    ))
-
-
 @rulespec_group_registry.register
 class RulespecGroupHostsMonitoringRulesHostChecks(RulespecSubGroup):
     @property
@@ -1401,24 +1283,6 @@ class RulespecGroupHostsMonitoringRulesHostChecks(RulespecSubGroup):
     @property
     def title(self):
         return _("Host checks")
-
-
-def _valuespec_host_label_rules():
-    return Labels(
-        world=Labels.World.CONFIG,
-        label_source=Labels.Source.RULESET,
-        title=_("Host labels"),
-        help=_("Use this ruleset to assign labels to hosts of your choice."),
-    )
-
-
-rulespec_registry.register(
-    HostRulespec(
-        group=RulespecGroupHostsMonitoringRulesHostChecks,
-        match_type="dict",
-        name="host_label_rules",
-        valuespec=_valuespec_host_label_rules,
-    ))
 
 
 @config_variable_registry.register
@@ -1455,7 +1319,6 @@ class ConfigVariableUserDowntimeTimeranges(ConfigVariable):
                                        default_value="next_day",
                                    )
                                ],
-                               style="dropdown",
                                default_value=24 * 60 * 60,
                            ))],
                 optional_keys=[],
@@ -1677,7 +1540,7 @@ class ConfigVariableTrustedCertificateAuthorities(ConfigVariable):
                      label=_("Trust system wide configured CAs"),
                  )),
                 ("trusted_cas", ListOfCAs(
-                    title=_("Check_MK specific"),
+                    title=_("Checkmk specific"),
                     allow_empty=True,
                 )),
             ],
@@ -2244,26 +2107,6 @@ class ConfigVariableDefaultUserProfile(ConfigVariable):
         return sorted(entries)
 
 
-@config_variable_registry.register
-class ConfigVariableSaveUserAccessTimes(ConfigVariable):
-    def group(self):
-        return ConfigVariableGroupUserManagement
-
-    def domain(self):
-        return ConfigDomainGUI
-
-    def ident(self):
-        return "save_user_access_times"
-
-    def valuespec(self):
-        return Checkbox(
-            title=_("Save last access times of users"),
-            label=_("Save the time of the latest user activity"),
-            help=_("When enabled, the time of the last access is stored for each user. The last "
-                   "activity is shown on the users page."),
-        )
-
-
 #.
 #   .--Check_MK------------------------------------------------------------.
 #   |              ____ _               _        __  __ _  __              |
@@ -2322,8 +2165,8 @@ class ConfigVariableUseNewDescriptionsFor(ConfigVariable):
                 ("cmciii_lcp_airin", _("Rittal CMC-III LCP: Air In and Temperature")),
                 ("cmciii_lcp_airout", _("Rittal CMC-III LCP: Air Out Temperature")),
                 ("cmciii_lcp_water", _("Rittal CMC-III LCP: Water In/Out Temperature")),
-                ("cmk_inventory", _("Monitor hosts for unchecked services (Check_MK Discovery)")),
-                ("dbd2_mem", _("Memory levels for DB2 memory usage")),
+                ("cmk_inventory", _("Monitor hosts for unchecked services (Checkmk Discovery)")),
+                ("dbd2_mem", _("DB2 memory usage")),
                 ("df", _("Used space in filesystems")),
                 ("df_netapp", _("NetApp Filers: Used Space in Filesystems")),
                 ("df_netapp32", _("NetApp Filers: Used space in Filesystem Using 32-Bit Counters")),
@@ -2576,7 +2419,7 @@ class ConfigVariableCheckMKPerfdataWithTimes(ConfigVariable):
 
     def valuespec(self):
         return Checkbox(
-            title=_("Check_MK with times performance data"),
+            title=_("Checkmk with times performance data"),
             label=_("Return process times within performance data"),
             help=_("Enabling this option results in additional performance data "
                    "for the Check_MK output, giving information regarding the process times. "
@@ -3008,7 +2851,7 @@ rulespec_registry.register(
 
 def _valuespec_check_periods():
     return TimeperiodSelection(
-        title=_("Check period for passive Check_MK services"),
+        title=_("Check period for passive Checkmk services"),
         help=_("If you specify a notification period for a Check_MK service then "
                "results will be processed only within this period."),
     )
@@ -3163,14 +3006,14 @@ rulespec_registry.register(
     ))
 
 
-def _host_check_commands_host_check_command_choices():
+def _host_check_commands_host_check_command_choices() -> List[CascadingDropdownChoice]:
     choices: List[CascadingDropdownChoice] = [
         ("ping", _("PING (active check with ICMP echo request)")),
-        ("smart", _("Smart PING (only with Check_MK Micro Core)")),
+        ("smart", _("Smart PING (only with Checkmk Micro Core)")),
         ("tcp", _("TCP Connect"),
          Integer(label=_("to port:"), minvalue=1, maxvalue=65535, default_value=80)),
         ("ok", _("Always assume host to be up")),
-        ("agent", _("Use the status of the Check_MK Agent")),
+        ("agent", _("Use the status of the Checkmk Agent")),
         ("service", _("Use the status of the service..."),
          TextUnicode(
              size=45,
@@ -3180,16 +3023,17 @@ def _host_check_commands_host_check_command_choices():
                     "with the name of the current host."),
          )),
     ]
+
     if config.user.may('wato.add_or_modify_executables'):
-        return choices + [
-            ("custom", _("Use a custom check plugin..."), PluginCommandLine()),
-        ]
+        choices.append(("custom", _("Use a custom check plugin..."), PluginCommandLine()))
+
+    return choices
 
 
 def _valuespec_host_check_commands():
     return CascadingDropdown(
         title=_("Host Check Command"),
-        help=_("Usually Check_MK uses a series of PING (ICMP echo request) in order to determine "
+        help=_("Usually Checkmk uses a series of PING (ICMP echo request) in order to determine "
                "whether a host is up. In some cases this is not possible, however. With this rule "
                "you can specify an alternative way of determining the host's state.") +
         _("The option to use a custom command can only be configured with the permission "
@@ -3546,76 +3390,11 @@ rulespec_registry.register(
     ))
 
 
-def _valuespec_extra_service_conf_notes_url():
-    return TextAscii(
-        label=_("URL:"),
-        title=_("Notes URL for Services"),
-        help=_("With this setting you can set links to documentations "
-               "for each service"),
-        attrencode=True,
-        size=80,
-    )
-
-
-rulespec_registry.register(
-    ServiceRulespec(
-        group=RulespecGroupMonitoringConfigurationNotifications,
-        item_type="service",
-        name="extra_service_conf:notes_url",
-        valuespec=_valuespec_extra_service_conf_notes_url,
-    ))
-
-
-def _valuespec_extra_host_conf_notes_url():
-    return TextAscii(
-        label=_("URL:"),
-        title=_("Notes URL for Hosts"),
-        help=_("With this setting you can set links to documentations "
-               "for Hosts"),
-        attrencode=True,
-        size=80,
-    )
-
-
-rulespec_registry.register(
-    HostRulespec(
-        group=RulespecGroupHostsMonitoringRulesNotifications,
-        name="extra_host_conf:notes_url",
-        valuespec=_valuespec_extra_host_conf_notes_url,
-    ))
-
-
-def _valuespec_extra_service_conf_display_name():
-    return TextUnicode(
-        title=_("Alternative display name for Services"),
-        help=_("This rule set allows you to specify an alternative name "
-               "to be displayed for certain services. This name is available as "
-               "a column when creating new views or modifying existing ones. "
-               "It is always visible in the details view of a service. In the "
-               "availability reporting there is an option for using that name "
-               "instead of the normal service description. It does <b>not</b> automatically "
-               "replace the normal service name in all views.<br><br><b>Note</b>: The "
-               "purpose of this rule set is to define unique names for several well-known "
-               "services. It cannot rename services in general."),
-        size=64,
-        attrencode=True,
-    )
-
-
-rulespec_registry.register(
-    ServiceRulespec(
-        group=RulespecGroupMonitoringConfigurationNotifications,
-        item_type="service",
-        name="extra_service_conf:display_name",
-        valuespec=_valuespec_extra_service_conf_display_name,
-    ))
-
-
 @rulespec_group_registry.register
 class RulespecGroupMonitoringConfigurationInventoryAndCMK(RulespecSubGroup):
     @property
     def main_group(self):
-        return RulespecGroupMonitoringConfiguration
+        return RulespecGroupDiscoveryCheckParameters
 
     @property
     def sub_group_name(self):
@@ -3678,24 +3457,6 @@ rulespec_registry.register(
     ))
 
 
-def _help_clustered_services():
-    return _("When you define HA clusters in WATO then you also have to specify which services "
-             "of a node should be assigned to the cluster and which services to the physical "
-             "node. This is done by this ruleset. Please note that the rule will be applied to "
-             "the <i>nodes</i>, not to the cluster.<br><br>Please make sure that you re-"
-             "inventorize the cluster and the physical nodes after changing this ruleset.")
-
-
-rulespec_registry.register(
-    BinaryServiceRulespec(
-        group=RulespecGroupMonitoringConfigurationInventoryAndCMK,
-        help_func=_help_clustered_services,
-        item_type="service",
-        name="clustered_services",
-        title=lambda: _("Clustered services"),
-    ))
-
-
 def _periodic_discovery_add_severity_new_host_label(val):
     val.setdefault("severity_new_host_label", 1)
     return val
@@ -3704,7 +3465,6 @@ def _periodic_discovery_add_severity_new_host_label(val):
 def _valuespec_periodic_discovery():
     return Alternative(
         title=_("Periodic service discovery"),
-        style="dropdown",
         default_value={
             "check_interval": 2 * 60,
             "severity_unmonitored": 1,
@@ -3987,6 +3747,49 @@ class RulespecGroupHostsMonitoringRulesVarious(RulespecSubGroup):
         return _("Various")
 
 
+def _valuespec_custom_service_attributes():
+    return ListOf(
+        CascadingDropdown(
+            choices=_custom_service_attributes_custom_service_attribute_choices(),
+            orientation="horizontal",
+        ),
+        title=_("Custom service attributes"),
+        help=_("Use this ruleset to assign <a href=\"%s\">%s</a> to services.") %
+        ("wato.py?mode=edit_configvar&varname=custom_service_attributes",
+         _("Custom service attributes")),
+        allow_empty=False,
+        validate=_custom_service_attributes_validate_unique_entries,
+    )
+
+
+rulespec_registry.register(
+    ServiceRulespec(
+        group=RulespecGroupMonitoringConfigurationVarious,
+        item_type="service",
+        match_type="all",
+        name="custom_service_attributes",
+        valuespec=_valuespec_custom_service_attributes,
+    ))
+
+
+def _help_clustered_services():
+    return _("When you define HA clusters in WATO then you also have to specify which services "
+             "of a node should be assigned to the cluster and which services to the physical "
+             "node. This is done by this ruleset. Please note that the rule will be applied to "
+             "the <i>nodes</i>, not to the cluster.<br><br>Please make sure that you re-"
+             "inventorize the cluster and the physical nodes after changing this ruleset.")
+
+
+rulespec_registry.register(
+    BinaryServiceRulespec(
+        group=RulespecGroupMonitoringConfigurationVarious,
+        help_func=_help_clustered_services,
+        item_type="service",
+        name="clustered_services",
+        title=lambda: _("Clustered services"),
+    ))
+
+
 def _valuespec_clustered_services_mapping():
     return TextAscii(
         title=_("Clustered services for overlapping clusters"),
@@ -4006,6 +3809,49 @@ rulespec_registry.register(
         item_type="service",
         name="clustered_services_mapping",
         valuespec=_valuespec_clustered_services_mapping,
+    ))
+
+
+def _valuespec_service_label_rules():
+    return Labels(
+        world=Labels.World.CONFIG,
+        label_source=Labels.Source.RULESET,
+        title=_("Service labels"),
+        help=_("Use this ruleset to assign labels to service of your choice."),
+    )
+
+
+rulespec_registry.register(
+    ServiceRulespec(
+        group=RulespecGroupMonitoringConfigurationVarious,
+        item_type="service",
+        match_type="dict",
+        name="service_label_rules",
+        valuespec=_valuespec_service_label_rules,
+    ))
+
+
+def _valuespec_service_tag_rules():
+    return ListOf(
+        CascadingDropdown(
+            choices=_service_tag_rules_tag_group_choices(),
+            orientation="horizontal",
+        ),
+        title=_("Service tags"),
+        help=_("Use this ruleset to assign <a href=\"%s\">%s</a> to services.") %
+        ("wato.py?mode=tags", _("Tags")),
+        allow_empty=False,
+        validate=_service_tag_rules_validate_unique_entries,
+    )
+
+
+rulespec_registry.register(
+    ServiceRulespec(
+        group=RulespecGroupMonitoringConfigurationVarious,
+        item_type="service",
+        match_type="all",
+        name="service_tag_rules",
+        valuespec=_valuespec_service_tag_rules,
     ))
 
 
@@ -4033,6 +3879,24 @@ rulespec_registry.register(
     ))
 
 
+def _valuespec_host_label_rules():
+    return Labels(
+        world=Labels.World.CONFIG,
+        label_source=Labels.Source.RULESET,
+        title=_("Host labels"),
+        help=_("Use this ruleset to assign labels to hosts of your choice."),
+    )
+
+
+rulespec_registry.register(
+    HostRulespec(
+        group=RulespecGroupHostsMonitoringRulesVarious,
+        match_type="dict",
+        name="host_label_rules",
+        valuespec=_valuespec_host_label_rules,
+    ))
+
+
 def _valuespec_extra_service_conf_service_period():
     return TimeperiodSelection(
         title=_("Service period for services"),
@@ -4049,12 +3913,76 @@ def _valuespec_extra_service_conf_service_period():
     )
 
 
+def _valuespec_extra_host_conf_notes_url():
+    return TextAscii(
+        label=_("URL:"),
+        title=_("Notes URL for Hosts"),
+        help=_("With this setting you can set links to documentations "
+               "for Hosts"),
+        attrencode=True,
+        size=80,
+    )
+
+
+rulespec_registry.register(
+    HostRulespec(
+        group=RulespecGroupHostsMonitoringRulesVarious,
+        name="extra_host_conf:notes_url",
+        valuespec=_valuespec_extra_host_conf_notes_url,
+    ))
+
 rulespec_registry.register(
     ServiceRulespec(
         group=RulespecGroupMonitoringConfigurationVarious,
         item_type="service",
         name="extra_service_conf:service_period",
         valuespec=_valuespec_extra_service_conf_service_period,
+    ))
+
+
+def _valuespec_extra_service_conf_display_name():
+    return TextUnicode(
+        title=_("Alternative display name for Services"),
+        help=_("This rule set allows you to specify an alternative name "
+               "to be displayed for certain services. This name is available as "
+               "a column when creating new views or modifying existing ones. "
+               "It is always visible in the details view of a service. In the "
+               "availability reporting there is an option for using that name "
+               "instead of the normal service description. It does <b>not</b> automatically "
+               "replace the normal service name in all views.<br><br><b>Note</b>: The "
+               "purpose of this rule set is to define unique names for several well-known "
+               "services. It cannot rename services in general."),
+        size=64,
+        attrencode=True,
+    )
+
+
+rulespec_registry.register(
+    ServiceRulespec(
+        group=RulespecGroupMonitoringConfigurationVarious,
+        item_type="service",
+        name="extra_service_conf:display_name",
+        valuespec=_valuespec_extra_service_conf_display_name,
+    ))
+
+
+def _valuespec_extra_service_conf_notes_url():
+    return TextAscii(
+        label=_("URL:"),
+        title=_("Notes URL for Services"),
+        help=_("With this setting you can set links to documentations "
+               "for each service"),
+        attrencode=True,
+        size=80,
+    )
+
+
+rulespec_registry.register(
+    ServiceRulespec(
+        group=RulespecGroupMonitoringConfigurationVarious,
+        item_type="service",
+        name="extra_service_conf:notes_url",
+        valuespec=_valuespec_extra_service_conf_notes_url,
     ))
 
 #.
@@ -4068,21 +3996,6 @@ rulespec_registry.register(
 #   +----------------------------------------------------------------------+
 #   | User interface specific rule sets                                    |
 #   '----------------------------------------------------------------------'
-
-
-@rulespec_group_registry.register
-class RulespecGroupUserInterface(RulespecGroup):
-    @property
-    def name(self):
-        return "user_interface"
-
-    @property
-    def title(self):
-        return _("User Interface")
-
-    @property
-    def help(self):
-        return _("Settings concerning the user interface of Check_MK")
 
 
 def _valuespec_extra_host_conf_icon_image():
@@ -4099,7 +4012,7 @@ def _valuespec_extra_host_conf_icon_image():
 
 rulespec_registry.register(
     HostRulespec(
-        group=RulespecGroupUserInterface,
+        group=RulespecGroupHostsMonitoringRulesVarious,
         name="extra_host_conf:icon_image",
         valuespec=_valuespec_extra_host_conf_icon_image,
     ))
@@ -4119,7 +4032,7 @@ def _valuespec_extra_service_conf_icon_image():
 
 rulespec_registry.register(
     ServiceRulespec(
-        group=RulespecGroupUserInterface,
+        group=RulespecGroupMonitoringConfigurationVarious,
         item_type="service",
         name="extra_service_conf:icon_image",
         valuespec=_valuespec_extra_service_conf_icon_image,
@@ -4135,7 +4048,7 @@ def _valuespec_host_icons_and_actions():
 
 rulespec_registry.register(
     HostRulespec(
-        group=RulespecGroupUserInterface,
+        group=RulespecGroupHostsMonitoringRulesVarious,
         match_type="all",
         name="host_icons_and_actions",
         valuespec=_valuespec_host_icons_and_actions,
@@ -4151,7 +4064,7 @@ def _valuespec_service_icons_and_actions():
 
 rulespec_registry.register(
     ServiceRulespec(
-        group=RulespecGroupUserInterface,
+        group=RulespecGroupMonitoringConfigurationVarious,
         item_type="service",
         match_type="all",
         name="service_icons_and_actions",
@@ -4164,11 +4077,11 @@ def _valuespec_extra_host_conf__ESCAPE_PLUGIN_OUTPUT():
         title=_("Escape HTML codes in host output"),
         help=_("By default, for security reasons, the GUI does not interpret any HTML "
                "code received from external sources, like plugin output or log messages. "
-               "If you are really sure what you are doing and need to have HTML codes, like "
+               "If you are really sure what you are doing and need to have HTML code, like "
                "links rendered, disable this option. Be aware, you might open the way "
                "for several injection attacks.") +
-        _("This setting can either be set globally or individually for selected hosts "
-          "or services using the host or service rulesets."),
+        _("The configured value for a host is accessible in notifications as well via the "
+          "variable <tt>HOST_ESCAPE_PLUGIN_OUTPUT</tt> of the notification context."),
         choices=[
             ("1", _("Escape HTML codes")),
             ("0", _("Don't escape HTML codes (insecure)")),
@@ -4179,7 +4092,7 @@ def _valuespec_extra_host_conf__ESCAPE_PLUGIN_OUTPUT():
 
 rulespec_registry.register(
     HostRulespec(
-        group=RulespecGroupUserInterface,
+        group=RulespecGroupHostsMonitoringRulesVarious,
         name="extra_host_conf:_ESCAPE_PLUGIN_OUTPUT",
         valuespec=_valuespec_extra_host_conf__ESCAPE_PLUGIN_OUTPUT,
     ))
@@ -4190,11 +4103,11 @@ def _valuespec_extra_service_conf__ESCAPE_PLUGIN_OUTPUT():
         title=_("Escape HTML codes in service output"),
         help=_("By default, for security reasons, the GUI does not interpret any HTML "
                "code received from external sources, like plugin output or log messages. "
-               "If you are really sure what you are doing and need to have HTML codes, like "
+               "If you are really sure what you are doing and need to have HTML code, like "
                "links rendered, disable this option. Be aware, you might open the way "
-               "for several injection attacks.") +
-        _("This setting can either be set globally or individually for selected hosts "
-          "or services using the host or service rulesets."),
+               "for several injection attacks. ") +
+        _("The configured value for a service is accessible in notifications as well via the "
+          "variable <tt>SERVICE_ESCAPE_PLUGIN_OUTPUT</tt> of the notification context."),
         choices=[
             ("1", _("Escape HTML codes")),
             ("0", _("Don't escape HTML codes (insecure)")),
@@ -4205,7 +4118,7 @@ def _valuespec_extra_service_conf__ESCAPE_PLUGIN_OUTPUT():
 
 rulespec_registry.register(
     ServiceRulespec(
-        group=RulespecGroupUserInterface,
+        group=RulespecGroupMonitoringConfigurationVarious,
         item_type="service",
         name="extra_service_conf:_ESCAPE_PLUGIN_OUTPUT",
         valuespec=_valuespec_extra_service_conf__ESCAPE_PLUGIN_OUTPUT,
@@ -4224,7 +4137,7 @@ class RulespecGroupAgent(RulespecGroup):
 
     @property
     def help(self):
-        return _("Settings concerning the connection to the Check_MK and SNMP agents")
+        return _("Settings concerning the connection to the Checkmk and SNMP agents")
 
 
 @rulespec_group_registry.register
@@ -4254,7 +4167,7 @@ rulespec_registry.register(
         group=RulespecGroupAgentGeneralSettings,
         help_func=_help_dyndns_hosts,
         name="dyndns_hosts",
-        title=lambda: _("Hosts with dynamic DNS lookup during monitoring"),
+        title=lambda: _("Hosts with dynamic DNS lookup"),
     ))
 
 
@@ -4547,7 +4460,7 @@ class RulespecGroupAgentCMKAgent(RulespecSubGroup):
 
     @property
     def title(self):
-        return _("Check_MK Agent")
+        return _("Checkmk Agent")
 
 
 def _valuespec_agent_ports():
@@ -4555,7 +4468,7 @@ def _valuespec_agent_ports():
         minvalue=1,
         maxvalue=65535,
         default_value=6556,
-        title=_("TCP port for connection to Check_MK agent"),
+        title=_("TCP port for connection to Checkmk agent"),
         help=_("This variable allows to specify the TCP port to "
                "be used to connect to the agent on a per-host-basis. "),
     )
@@ -4595,49 +4508,50 @@ rulespec_registry.register(
 def agent_config_mk_agent_sections():
     # The key must match the section exclude parameter in the checkmk_agent i.e. MK_SKIP_<key>
     return [
-        ("df", _("Filesystems usage")),
-        ("systemd", _("Systemd services")),
-        ("zfs", _("ZFS filesystem usage")),
-        ("nfs_mounts", ("NFS mounts")),
-        ("mounts", _("Mount options")),
-        ("ps", _("Running processes")),
-        ("mem", _("Memory")),
-        ("cpu", _("CPU")),
-        ("uptime", _("UPTIME")),
-        ("lnx_if", _("Linux interfaces")),
         ("bonding_if", _("Bonding interfaces")),
-        ("vswitch_bonding", _("Vswitch bonding")),
-        ("tcp", _("TCP")),
-        ("multipathing", _("Multipathing")),
+        ("chrony", _("Chrony timesynchronisation")),
+        ("cpu", _("CPU")),
         ("diskstat", _("Diskstat")),
-        ("kernel", _("Kernel")),
+        ("drbd", _("DRBD")),
+        ("fileinfo", _("Fileinfo")),
+        ("df", _("Filesystems usage")),
+        ("haproxy", _("Haproxy")),
+        ("heartbeat", _("Heartbeat clusters")),
+        ("labels", _("Host label")),
+        ("http_accelerator", _("HTTP accelerator statistics")),
         ("ipmitool", _("Ipmitool")),
         ("ipmisensors", _("Ipmisensors")),
+        ("kernel", _("Kernel")),
+        ("libelle", _("Libelle Business Shadow")),
+        ("lnx_if", _("Linux interfaces")),
+        ("mailqueue", _("Mailqueue")),
+        ("mem", _("Memory")),
+        ("job", _("Monitored jobs")),
+        ("multipathing", _("Multipathing")),
+        ("mounts", _("Mount options")),
+        ("nfs_mounts", ("NFS mounts")),
+        ("timesynchronisation", _("NTP or timesyncd time synchronisation")),
+        ("nvidia", _("Nvidia")),
+        ("omd_cores", _("OMD monitoring cores")),
+        ("openvpn", _("OpenVPN clients")),
+        ("proxmox", _("Proxmox cluster")),
         ("md", _("Raid status of Linux software")),
         ("dm_raid", _("Raid status of Linux Raid")),
         ("cfggen", _("Raid status of LSI controllers")),
         ("megaraid", _("Raid status of LSI MegaRAID controller")),
         ("three_ware_raid", _("Raid status of 3WARE disk controller")),
         ("areca", _("Raid controllers from Areca")),
-        ("vbox_guest", _("VirtualBox Guests")),
-        ("openvpn", _("OpenVPN clients")),
-        ("timesynchronisation", _("NTP or timesyncd time synchronisation")),
-        ("chrony", _("Chrony timesynchronisation")),
-        ("nvidia", _("Nvidia")),
-        ("drbd", _("DRBD")),
-        ("heartbeat", _("Heartbeat clusters")),
-        ("mailqueue", _("Mailqueue")),
+        ("ps", _("Running processes")),
         ("omd", _("Status of OMD sites and Checkmk Notification spooler")),
-        ("zpool", _("Zpool status")),
-        ("veritas", _("Veritas cluster server")),
-        ("fileinfo", _("Fileinfo")),
-        ("omd_cores", _("OMD monitoring cores")),
-        ("job", _("Monitored jobs")),
+        ("systemd", _("Systemd services")),
+        ("tcp", _("TCP")),
         ("thermal", _("Thermal information")),
-        ("libelle", _("Libelle Business Shadow")),
-        ("http_accelerator", _("HTTP accelerator statistics")),
-        ("proxmox", _("Proxmox cluster")),
-        ("haproxy", _("Haproxy")),
+        ("uptime", _("UPTIME")),
+        ("veritas", _("Veritas cluster server")),
+        ("vbox_guest", _("VirtualBox Guests")),
+        ("vswitch_bonding", _("Vswitch bonding")),
+        ("zfs", _("ZFS filesystem usage")),
+        ("zpool", _("Zpool status")),
     ]
 
 
@@ -4658,7 +4572,7 @@ def _valuespec_agent_config_agent_sections():
                         "Checked options will be excluded in the agent. Omission of a section "
                         "will result in the absence of the associated Checkmk service or services."
                     ),
-                    choices=agent_config_mk_agent_sections(),
+                    choices=sorted(agent_config_mk_agent_sections(), key=lambda x: x[1]),
                     toggle_all=True,
                 ),
             ),
@@ -4777,11 +4691,11 @@ def _valuespec_check_mk_exit_status():
                              ListOf(
                                  Tuple(elements=[
                                      RegExpUnicode(help=_(
-                                         'Beside of setting the generic "Missing sections" state '
-                                         'above you can specify a regex pattern to match specific '
-                                         'check plugins and give them an individual state in case '
-                                         'they receive no monitoring data. Note that the first '
-                                         'match is used.'),
+                                         'In addition to setting the generic "Missing monitoring '
+                                         'data" state above you can specify a regex pattern to '
+                                         'match specific check plugins and give them an individual '
+                                         'state in case they receive no monitoring data. Note that '
+                                         'the first match is used.'),
                                                    mode=RegExpUnicode.prefix),
                                      MonitoringState(),
                                  ],
@@ -4841,7 +4755,7 @@ def _valuespec_check_mk_exit_status():
             optional_keys=["individual", "restricted_address_mismatch"],
         ),
         forth=transform_exit_code_spec,
-        title=_("Status of the Check_MK services"),
+        title=_("Status of the Checkmk services"),
         help=_("This ruleset specifies the total status of the Check_MK services <i>Check_MK</i>, "
                "<i>Check_MK Discovery</i> and <i>Check_MK HW/SW Inventory</i> in case of various "
                "error situations. One use case is the monitoring of hosts that are not always up. "
@@ -4863,7 +4777,7 @@ rulespec_registry.register(
 def _valuespec_check_mk_agent_target_versions():
     return Transform(
         CascadingDropdown(
-            title=_("Check for correct version of Check_MK agent"),
+            title=_("Check for correct version of Checkmk agent"),
             help=_("Here you can make sure that all of your Check_MK agents are running"
                    " one specific version. Agents running "
                    " a different version return a non-OK state."),
@@ -5017,7 +4931,7 @@ rulespec_registry.register(
 def get_snmp_section_names():
     sections = get_section_information()
     section_choices = {(s['name'], s['name']) for s in sections.values() if s['type'] == 'snmp'}
-    return [(None, _('All SNMP sections'))] + sorted(section_choices)
+    return sorted(section_choices)
 
 
 def _valuespec_snmp_fetch_interval():
@@ -5036,7 +4950,7 @@ def _valuespec_snmp_fetch_interval():
                            "SNMP fetch intervals for SNMP based sections. "
                            "The reason for this is that the check plugins themselves are not "
                            "aware wether or not they are processing SNMP based data."),
-                    choices=get_snmp_section_names,
+                    choices=lambda: [(None, _('All SNMP sections'))] + get_snmp_section_names(),
                 ),
                 # Transform check types to section names
                 forth=lambda e: e.split(".")[0] if e is not None else None,
@@ -5055,6 +4969,60 @@ rulespec_registry.register(
         group=RulespecGroupAgentSNMP,
         name="snmp_check_interval",  # legacy name, kept for compatibility
         valuespec=_valuespec_snmp_fetch_interval,
+    ))
+
+
+def _valuespec_snmp_config_agent_sections():
+    return Dictionary(
+        title=_("Include or exclude SNMP sections"),
+        elements=[
+            (
+                "sections",
+                ListOf(
+                    Tuple(elements=[
+                        DropdownChoice(
+                            title=_("SNMP section name"),
+                            choices=get_snmp_section_names,
+                        ),
+                        DropdownChoice(choices=[(True, _("Disable")), (False, _("Enable"))]),
+                    ],),),
+            ),
+        ],
+        help=_("This option allows to omit individual sections from being fetched at all. "
+               "Disabled sections will not be fetched. As a result, associated Checkmk "
+               "services may be entirely missing.") + " " +
+        _("However, some check plugins process multiple sections and their behavior may change if "
+          "one of them is excluded. In such cases, you may want to disable individual sections, "
+          "instead of the check plugin itself. Furthermore, SNMP sections can supersede other SNMP "
+          "sections in order to prevent duplicate services. By excluding a section which "
+          "supersedes another one, the superseded section might become available. One such use "
+          "case is the enforcing of 32-bit network interface counters (section <tt>if</tt>, "
+          "superseded by <tt>if64</tt>) in case the 64-bit counters reported by the device are "
+          "useless due to broken firmware."),
+        validate=_validate_snmp_config_agent_sections,
+        optional_keys=[],
+    )
+
+
+def _validate_snmp_config_agent_sections(value, varprefix):
+    section_settings = value.get('sections', [])
+    if not section_settings:
+        return
+
+    most_common = collections.Counter(s for s, _v in section_settings).most_common()
+    if most_common[0][1] > 1:  # count of the very most common one
+        offenders = ', '.join(name for name, count in most_common if count > 1)
+        raise MKUserError(
+            varprefix,
+            "%s %s" % (_("Section(s) specified more than once:"), offenders),
+        )
+
+
+rulespec_registry.register(
+    HostRulespec(
+        group=RulespecGroupAgentSNMP,
+        name="snmp_exclude_sections",
+        valuespec=_valuespec_snmp_config_agent_sections,
     ))
 
 

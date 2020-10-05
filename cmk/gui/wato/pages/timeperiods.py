@@ -6,7 +6,7 @@
 """Modes for managing timeperiod definitions for the core"""
 
 import time
-from typing import Any, Dict, List, Optional as _Optional, Tuple as _Tuple
+from typing import Any, Dict, List, Optional as _Optional, Tuple as _Tuple, Type
 
 import cmk.utils.version as cmk_version
 import cmk.utils.defines as defines
@@ -38,11 +38,19 @@ from cmk.gui.valuespec import (
     CascadingDropdown,
     ListOfTimeRanges,
 )
+from cmk.gui.breadcrumb import Breadcrumb
+from cmk.gui.page_menu import (
+    PageMenu,
+    PageMenuDropdown,
+    PageMenuTopic,
+    PageMenuEntry,
+    make_simple_link,
+    make_simple_form_page_menu,
+)
 
 from cmk.gui.plugins.wato import (
     WatoMode,
     wato_confirm,
-    global_buttons,
     mode_registry,
     make_action_link,
 )
@@ -70,14 +78,42 @@ class ModeTimeperiods(WatoMode):
         self._timeperiods = watolib.timeperiods.load_timeperiods()
 
     def title(self):
-        return _("Timeperiods")
+        return _("Time periods")
 
-    def buttons(self):
-        global_buttons()
-        html.context_button(_("New Timeperiod"),
-                            watolib.folder_preserving_link([("mode", "edit_timeperiod")]), "new")
-        html.context_button(_("Import iCalendar"),
-                            watolib.folder_preserving_link([("mode", "import_ical")]), "ical")
+    def page_menu(self, breadcrumb: Breadcrumb) -> PageMenu:
+        return PageMenu(
+            dropdowns=[
+                PageMenuDropdown(
+                    name="timeperiods",
+                    title=_("Time periods"),
+                    topics=[
+                        PageMenuTopic(
+                            title=_("Add time period"),
+                            entries=[
+                                PageMenuEntry(
+                                    title=_("Add time period"),
+                                    icon_name="new",
+                                    item=make_simple_link(
+                                        watolib.folder_preserving_link([("mode", "edit_timeperiod")
+                                                                       ])),
+                                    is_shortcut=True,
+                                    is_suggested=True,
+                                ),
+                                PageMenuEntry(
+                                    title=_("Import iCalendar"),
+                                    icon_name="ical",
+                                    item=make_simple_link(
+                                        watolib.folder_preserving_link([("mode", "import_ical")])),
+                                    is_shortcut=True,
+                                    is_suggested=True,
+                                ),
+                            ],
+                        ),
+                    ],
+                ),
+            ],
+            breadcrumb=breadcrumb,
+        )
 
     def action(self):
         delname = html.request.var("_delete")
@@ -304,12 +340,18 @@ class ModeTimeperiodImportICal(WatoMode):
     def permissions(cls):
         return ["timeperiods"]
 
-    def title(self):
-        return _("Import iCalendar File to create a Timeperiod")
+    @classmethod
+    def parent_mode(cls) -> _Optional[Type[WatoMode]]:
+        return ModeTimeperiods
 
-    def buttons(self):
-        html.context_button(_("All Timeperiods"),
-                            watolib.folder_preserving_link([("mode", "timeperiods")]), "back")
+    def title(self):
+        return _("Import iCalendar File to create a time period")
+
+    def page_menu(self, breadcrumb: Breadcrumb) -> PageMenu:
+        return make_simple_form_page_menu(breadcrumb,
+                                          form_name="import_ical",
+                                          button_name="upload",
+                                          save_title=_("Import"))
 
     def _vs_ical(self):
         return Dictionary(
@@ -556,7 +598,6 @@ class ModeTimeperiodImportICal(WatoMode):
         html.begin_form("import_ical", method="POST")
         self._vs_ical().render_input("ical", {})
         forms.end()
-        html.button("upload", _("Import"))
         html.hidden_fields()
         html.end_form()
 
@@ -570,6 +611,10 @@ class ModeEditTimeperiod(WatoMode):
     @classmethod
     def permissions(cls):
         return ["timeperiods"]
+
+    @classmethod
+    def parent_mode(cls) -> _Optional[Type[WatoMode]]:
+        return ModeTimeperiods
 
     def _from_vars(self):
         self._timeperiods = watolib.timeperiods.load_timeperiods()
@@ -600,12 +645,11 @@ class ModeEditTimeperiod(WatoMode):
 
     def title(self):
         if self._new:
-            return _("Create new time period")
+            return _("Add time period")
         return _("Edit time period")
 
-    def buttons(self):
-        html.context_button(_("All Timeperiods"),
-                            watolib.folder_preserving_link([("mode", "timeperiods")]), "back")
+    def page_menu(self, breadcrumb: Breadcrumb) -> PageMenu:
+        return make_simple_form_page_menu(breadcrumb, form_name="timeperiod", button_name="save")
 
     def _valuespec(self):
         if self._new:
@@ -624,7 +668,7 @@ class ModeEditTimeperiod(WatoMode):
             name_element = FixedValue(self._name,)
 
         return Dictionary(
-            title=_("Timeperiod"),
+            title=_("Time period"),
             elements=[
                 ("name", name_element),
                 ("alias",
@@ -756,7 +800,7 @@ class ModeEditTimeperiod(WatoMode):
         if not html.check_transaction():
             return
 
-        vs = self._valuespec()
+        vs = self._valuespec()  # returns a Dictionary object
         vs_spec = vs.from_html_vars("timeperiod")
         vs.validate_value(vs_spec, "timeperiod")
         self._timeperiod = self._from_valuespec(vs_spec)
@@ -775,11 +819,10 @@ class ModeEditTimeperiod(WatoMode):
         html.begin_form("timeperiod", method="POST")
         self._valuespec().render_input("timeperiod", self._to_valuespec(self._timeperiod))
         forms.end()
-        html.button("save", _("Save"))
         html.hidden_fields()
         html.end_form()
 
-    # The timeperiod data structure for the Check_MK config looks like follows.
+    # The timeperiod data structure for the Checkmk config looks like follows.
     # { 'alias': u'eeee',
     #   'monday': [('00:00', '22:00')],
     #   'tuesday': [('00:00', '24:00')],
@@ -850,8 +893,7 @@ class ModeEditTimeperiod(WatoMode):
             tp_spec["exclude"] = vs_spec["exclude"]
 
         tp_spec.update(self._exceptions_from_valuespec(vs_spec))
-        tp_spec.update(self._weekdays_from_valuespec(vs_spec))
-
+        tp_spec.update(self._time_exceptions_from_valuespec(vs_spec))
         return tp_spec
 
     def _exceptions_from_valuespec(self, vs_spec):
@@ -861,19 +903,22 @@ class ModeEditTimeperiod(WatoMode):
                 tp_spec[exception_name] = self._time_ranges_from_valuespec(time_ranges)
         return tp_spec
 
-    def _weekdays_from_valuespec(self, vs_spec):
-        weekday_ty, weekday_values = vs_spec["weekdays"]
+    def _time_exceptions_from_valuespec(self, vs_spec):
+        # TODO: time exceptions is either a list of tuples or a dictionary for
+        period_type, exceptions_details = vs_spec["weekdays"]
 
-        if weekday_ty not in ["whole_week", "day_specific"]:
+        if period_type not in ["whole_week", "day_specific"]:
             raise NotImplementedError()
 
         # produce a data structure equal to the "day_specific" structure
-        if weekday_ty == "whole_week":
-            weekday_values = {day: weekday_values for day in defines.weekday_ids()}
+        if period_type == "whole_week":
+            time_exceptions = {day: exceptions_details for day in defines.weekday_ids()}
+        else:  # specific days
+            time_exceptions = exceptions_details
 
         return {
-            day: self._time_ranges_from_valuespec(weekday_values[day])
-            for day, time_ranges in weekday_values.items()
+            day: self._time_ranges_from_valuespec(time_exceptions[day])
+            for day, time_ranges in time_exceptions.items()
             if time_ranges
         }
 
@@ -882,8 +927,8 @@ class ModeEditTimeperiod(WatoMode):
 
     def _time_range_from_valuespec(self, value):
         """Convert a time range specification from valuespec format"""
-        return tuple(map(self._time_from_valuespec, value))
+        return tuple(map(self._format_valuespec_time, value))
 
-    def _time_from_valuespec(self, value):
+    def _format_valuespec_time(self, value):
         """Convert a time specification from valuespec format"""
         return "%02d:%02d" % value

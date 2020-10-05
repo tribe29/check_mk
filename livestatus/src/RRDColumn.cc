@@ -32,7 +32,7 @@
 #include "strutil.h"
 
 RRDColumn::RRDColumn(const std::string &name, const std::string &description,
-                     const Column::Offsets &offsets, MonitoringCore *mc,
+                     const ColumnOffsets &offsets, MonitoringCore *mc,
                      RRDColumnArgs args)
     : ListColumn(name, description, offsets), _mc(mc), _args(std::move(args)) {}
 
@@ -210,7 +210,7 @@ RRDColumn::Data RRDColumn::getData(Row row) const {
     // https://github.com/oetiker/rrdtool-1.x/issues/1062
 
     auto *logger = _mc->loggerRRD();
-    if (!_mc->rrdcachedSocketPath().empty()) {
+    if (_mc->pnp4nagiosEnabled() && !_mc->rrdcachedSocketPath().empty()) {
         std::vector<std::string> daemon_argv_s{
             "rrdtool flushcached",  // name of program (ignored)
             "--daemon", _mc->rrdcachedSocketPath()};

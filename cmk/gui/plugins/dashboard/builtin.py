@@ -20,6 +20,7 @@ builtin_dashboards["main"] = {
     "title": _("Main Overview"),
     "topic": "overview",
     "sort_index": 10,
+    "icon": "dashboard",
     "description": _("This dashboard gives you a general overview on the state of your "
                      "monitored devices."),
     "dashlets": [
@@ -186,6 +187,7 @@ builtin_dashboards["topology"] = {
     "show_title": False,
     "title": _("Network Topology"),
     "topic": "overview",
+    "icon": "network_topology",
     "sort_index": 50,
     "description": _("This dashboard uses the parent relationships of your hosts to display a "
                      "hierarchical map."),
@@ -209,8 +211,9 @@ builtin_dashboards["simple_problems"] = {
     "context": {},
     "mtime": 0,
     "show_title": True,
-    "title": _("Host & Services Problems"),
+    "title": _("Host & service problems"),
     "topic": "problems",
+    "icon": "host_svc_problems",
     "sort_index": 10,
     "description": _("A compact dashboard which lists your unhandled host and service problems."),
     "dashlets": [

@@ -8,12 +8,14 @@
 from typing import Any, Callable, Dict, List, Optional
 
 from cmk.snmplib.type_defs import SNMPDetectSpec, SNMPTree
-from cmk.base.api.agent_based.type_defs import (
-    AgentParseFunction,
+from cmk.base.api.agent_based.inventory_classes import InventoryFunction
+from cmk.base.api.agent_based.checking_classes import (
     CheckFunction,
-    InventoryFunction,
     DiscoveryFunction,
     DiscoveryRuleSetType,
+)
+from cmk.base.api.agent_based.type_defs import (
+    AgentParseFunction,
     HostLabelFunction,
     SNMPParseFunction,
 )
@@ -40,7 +42,7 @@ def agent_section(
     *,
     name: str,
     parsed_section_name: Optional[str] = None,
-    parse_function: AgentParseFunction,
+    parse_function: Optional[AgentParseFunction] = None,
     host_label_function: Optional[HostLabelFunction] = None,
     supersedes: Optional[List[str]] = None,
 ) -> None:
@@ -81,7 +83,7 @@ def snmp_section(
     *,
     name: str,
     parsed_section_name: Optional[str] = None,
-    parse_function: SNMPParseFunction,
+    parse_function: Optional[SNMPParseFunction] = None,
     host_label_function: Optional[HostLabelFunction] = None,
     detect: SNMPDetectSpec,
     trees: List[SNMPTree],

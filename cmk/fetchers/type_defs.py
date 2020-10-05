@@ -5,15 +5,14 @@
 # conditions defined in the file COPYING, which is part of this source code package.
 """Package containing the fetchers to the data sources."""
 
-from typing import TypeVar, Union
+import enum
 
-from cmk.utils.type_defs import AgentRawData
+__all__ = ["Mode"]
 
-from cmk.snmplib.type_defs import SNMPRawData
 
-__all__ = ["BoundedAbstractRawData"]
-
-# TODO(ml): This type does not really belong here but there currently
-#           is not better place.
-AbstractRawData = Union[AgentRawData, SNMPRawData]
-BoundedAbstractRawData = TypeVar("BoundedAbstractRawData", bound=AbstractRawData)
+class Mode(enum.Enum):
+    NONE = enum.auto()
+    CHECKING = enum.auto()
+    DISCOVERY = enum.auto()
+    INVENTORY = enum.auto()
+    RTC = enum.auto()

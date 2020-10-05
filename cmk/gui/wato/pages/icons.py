@@ -6,7 +6,6 @@
 
 import os
 import io
-from typing import Iterable
 
 from PIL import Image, PngImagePlugin  # type: ignore[import]
 
@@ -27,10 +26,6 @@ from cmk.gui.valuespec import (
 from cmk.gui.breadcrumb import Breadcrumb
 from cmk.gui.page_menu import (
     PageMenu,
-    PageMenuDropdown,
-    PageMenuTopic,
-    PageMenuEntry,
-    make_simple_link,
     make_simple_form_page_menu,
 )
 
@@ -57,38 +52,14 @@ class ModeIcons(WatoMode):
         return _("Custom icons")
 
     def page_menu(self, breadcrumb: Breadcrumb) -> PageMenu:
-        menu = make_simple_form_page_menu(breadcrumb,
+        return make_simple_form_page_menu(breadcrumb,
                                           form_name="upload_form",
                                           button_name="_do_upload",
                                           save_title=_("Upload"),
                                           add_abort_link=False)
 
-        menu.dropdowns.insert(
-            1,
-            PageMenuDropdown(
-                name="related",
-                title=_("Related"),
-                topics=[
-                    PageMenuTopic(
-                        title=_("Setup"),
-                        entries=list(self._page_menu_entries_related()),
-                    ),
-                ],
-            ))
-
-        return menu
-
-    def _page_menu_entries_related(self) -> Iterable[PageMenuEntry]:
-        yield PageMenuEntry(
-            title=_("User interface rulesets"),
-            icon_name="rulesets",
-            item=make_simple_link(
-                html.makeuri_contextless([("mode", "rulesets"), ("group", "user_interface")],
-                                         filename="wato.py")),
-        )
-
     def _load_custom_icons(self):
-        s = IconSelector()
+        s = IconSelector(show_builtin_icons=False)
         return s.available_icons(only_local=True)
 
     def _vs_upload(self):
@@ -169,7 +140,12 @@ class ModeIcons(WatoMode):
 
     def page(self) -> None:
         html.h3(_("Upload Icon"))
-        html.p(_("Allowed are single PNG image files with a maximum size of 80x80 px."))
+        html.p(
+            _("Here you can add icons, for example to use them in bookmarks or "
+              "in custom actions of views. Allowed are single PNG image files "
+              "with a maximum size of 80x80 px. Custom actions have to be defined "
+              "in the global settings and can be used in the custom icons rules "
+              "of hosts and services."))
 
         html.begin_form('upload_form', method='POST')
         self._vs_upload().render_input('_upload_icon', None)
