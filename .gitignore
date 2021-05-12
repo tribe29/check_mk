@@ -49,6 +49,7 @@ doc/plugin-api/source/apidoc/
 install-sh
 missing
 mk-livestatus-*.tar.gz
+pb_files.status
 stamp-h1
 tags
 tests/web/data/*

@@ -38,6 +38,8 @@ sphinx-rtd-theme = "*"  # used for the plugin API documentation
 fakeredis = {extras = ["lua"],version = "1.4.5"}  # used for testing code which uses Redis (freeze version due to dependency on redis, which is fixed to some version, lua is needed for faking features like "lock")
 sphinxcontrib-plantuml = "*"
 sphinxcontrib-spelling = "*"
+protobuf = ">3.0"
+google.protobuf = "*"
 
 [packages]
 setuptools_scm = "==4.1.2"  # needed by various setup.py

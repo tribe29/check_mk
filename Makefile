@@ -121,7 +121,7 @@ check-version:
 # is currently not used by most distros
 # Would also use --exclude-vcs, but this is also not available
 # And --transform is also missing ...
-dist: $(DISTNAME).tar.gz config.h.in $(DIST_DEPS)
+dist: pb_files.status $(DISTNAME).tar.gz config.h.in $(DIST_DEPS)
 ifeq ($(ENTERPRISE),yes)
 	$(MAKE) -C enterprise agents/plugins/cmk-update-agent
 	$(MAKE) -C enterprise agents/plugins/cmk-update-agent-32
@@ -439,6 +439,7 @@ setup:
 	    valgrind \
 	    shellcheck \
 	    direnv \
+            protoc \
 	    python3-pip \
 	    python3.8-dev \
 	    python-setuptools \
@@ -484,6 +485,11 @@ config.status: $(CONFIG_DEPS)
 	  ./configure CXXFLAGS="$(CXX_FLAGS)" "$$RRD_OPT" "$$RE2_OPT" ; \
 	fi
 
+pb_files.status: enterprise/protocols/microcore.proto
+ifeq ($(ENTERPRISE),yes)
+	protoc -I=enterprise/protocols --cpp_out=enterprise/core/src/ --python_out=cmk/base/cee/ $< && touch $@
+endif
+
 configure: $(CONFIGURE_DEPS)
 	autoconf
 
@@ -511,7 +517,7 @@ GTAGS: config.h
 # to configure.ac).
 	$(MAKE) -C livestatus GTAGS
 
-compile-neb-cmc: config.status
+compile-neb-cmc: config.status pb_files.status
 	$(MAKE) -C livestatus -j4
 ifeq ($(ENTERPRISE),yes)
 	$(MAKE) -C enterprise/core -j4
