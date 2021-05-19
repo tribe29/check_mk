@@ -424,6 +424,7 @@ setup:
 	    libclang-common-10-dev \
 	    libclang1-10 \
 	    libjpeg-dev \
+	    libprotobuf-dev \
 	    doxygen \
 	    figlet \
 	    g++ \
@@ -439,7 +440,7 @@ setup:
 	    valgrind \
 	    shellcheck \
 	    direnv \
-            protoc \
+	    protobuf-compiler \
 	    python3-pip \
 	    python3.8-dev \
 	    python-setuptools \

@@ -101,6 +101,16 @@ AC_SUBST(RE2_LIBS)
 
 AC_LANG_POP([C++])
 
+# Protobuf stuff
+PKG_CHECK_MODULES(PROTOBUF, protobuf >= 3.6.0)
+AC_SUBST(PROTOBUF_LIBS)
+AC_SUBST(PROTOBUF_CFLAGS)
+AC_SUBST(PROTOBUF_VERSION)
+
+AC_CHECK_PROG([PROTOC], [protoc], [protoc])
+AS_IF([test "x${PROTOC}" == "x"],
+    [AC_MSG_ERROR([ProtBuf compiler "protoc" is absent.])])
+
 # Checks for typedefs, structures, and compiler characteristics.
 AC_HEADER_STDBOOL
 AC_C_CONST
