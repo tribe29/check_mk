@@ -431,6 +431,7 @@ setup:
 	    libpcap-dev \
 	    librrd-dev \
 	    libxml2-dev \
+	    libprotobuf-dev \
 	    libpango1.0-dev \
 	    libsasl2-dev \
 	    libldap2-dev \
