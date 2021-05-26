@@ -9,6 +9,8 @@ unreadVariable:test/test_*.cc
 // We do not care about warnings in our libraries.
 *:*/includes/*
 *:*/include/re2/*
+// We do not care about warnings in generated files
+*:*.pb.*
 // Why on earth do we need this???
 unmatchedSuppression:test/test_*.cc
 unmatchedSuppression:*/includes/*
