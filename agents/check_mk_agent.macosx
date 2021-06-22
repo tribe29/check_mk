@@ -10,8 +10,28 @@
 export LC_ALL=C
 unset LANG
 
-export MK_LIBDIR="/to/be/changed"
-export MK_CONFDIR="/to/be/changed"
+export MK_LIBDIR="/usr/lib/check_mk_agent"
+export MK_CONFDIR="/etc/check_mk"
+
+
+# Check if remote address should be allowed
+if [ -e "$MK_CONFDIR/user.cfg" ]; then
+    . "$MK_CONFDIR/user.cfg"
+
+    REMOTE_ADDR=$(netstat -an | grep "tcp4.*\.6556.*ESTABLISHED"  | awk '{gsub(/\.[0-9]+$/, "", $5 ) ; print $5 }')
+    if [ -n "$ONLY_FROM" ] && [ -n "$REMOTE_ADDR" ] ; then
+        REMOTE_DENY_FLAG=1
+        for ONLY_FROMX in $ONLY_FROM; do
+            if [ "$ONLY_FROMX" == "$REMOTE_ADDR" ]; then
+                REMOTE_DENY_FLAG=0
+            fi
+        done
+        if [ 1 -eq "$REMOTE_DENY_FLAG" ]; then
+            exit 31
+        fi
+    fi
+fi
+
 
 # Optionally set a tempdir for all subsequent calls
 #export TMPDIR=
