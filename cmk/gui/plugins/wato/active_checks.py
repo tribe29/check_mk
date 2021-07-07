@@ -569,6 +569,10 @@ rulespec_registry.register(
         valuespec=_valuespec_active_checks_dns,
     ))
 
+def transform_check_sql_perfdata(perfdata):
+    if not isinstance(perfdata, str):
+        return "performance_data"
+    return perfdata
 
 def _valuespec_active_checks_sql():
     return Dictionary(
@@ -684,10 +688,13 @@ def _valuespec_active_checks_sql():
                    elements=[Float(title=_("Warning below")),
                              Float(title=_("Critical below"))])),
             ("perfdata",
-             FixedValue(
-                 title=_("Performance Data"),
-                 totext=_("Store output value into RRD database"),
-                 value=True,
+             Transform(
+                 TextAscii(
+                     title=_("Performance Data"),
+                     help=_("Store output value into RRD database in a metric with this name."),
+                     default_value='performance_data',
+                 ),
+                 forth=transform_check_sql_perfdata,
              )),
             ("host",
              TextInput(
