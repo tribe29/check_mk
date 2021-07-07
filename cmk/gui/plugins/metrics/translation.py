@@ -767,6 +767,7 @@ check_metrics["check_mk-vnx_quotas"] = df_translation
 check_metrics["check_mk-k8s_stats_fs"] = df_translation
 check_metrics["check_mk-sap_hana_diskusage"] = df_translation
 check_metrics["check_mk-fjdarye200_pools"] = df_translation
+check_metrics["check_mk-db2_logsizes"] = df_translation
 check_metrics["check_mk-dell_compellent_folder"] = df_translation
 check_metrics["check_mk-nimble_volumes"] = df_translation
 check_metrics["check_mk-ceph_df"] = df_translation
