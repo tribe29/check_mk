@@ -189,6 +189,72 @@ if [ -n "$IS_DOCKERIZED" ] || [ -n "$IS_LXC_CONTAINER" ]; then
     fi
 fi
 
+# Function to list CIFS mounts for use by section_nfs
+get_cifs_mounts() {
+    if [ -r /proc/mounts ]; then
+        sed -n '/ cifs\? /s/[^ ]* \([^ ]*\) .*/\1/p' < /proc/mounts | sed 's/\\040/ /g'
+    else
+        mount | awk '/ cifs/{print $3;}'
+    fi
+}
+
+# Function to list NFS mounts for use by section_nfs
+get_nfs_mounts() {
+    if [ -r /proc/mounts ]; then
+        sed -n '/ nfs4\? /s/[^ ]* \([^ ]*\) .*/\1/p' < /proc/mounts | sed 's/\\040/ /g'
+    else
+        mount | awk '/ nfs/{print $3;}'
+    fi
+}
+
+# Convert a three number style semantic version number to an integer for version comparisons
+# This zero pads, to double digits, the second and third numbers and removes any non-numerical chars
+# e.g. 'openssl 1.0.2k-fips' -> '10002'
+semver_to_int() {
+    _sem_ver="${1:?No version number supplied}"
+
+    # Strip the variable of any non-numerics or dots
+    # Portable version: _sem_ver="$(echo "${_sem_ver}" | sed 's/[^0-9.]//g')"
+    _sem_ver="${_sem_ver//[!0-9.]/}"
+
+    # Swap the dots for spaces and assign the outcome to the positional param array
+    # We want word splitting here, so we disable shellcheck's complaints
+    # shellcheck disable=SC2086
+    set -- ${_sem_ver//./ }
+
+    # Assemble and print our integer
+    printf -- '%d%02d%02d' "${1}" "${2:-0}" "${3:-0}"
+
+    unset -v _sem_ver
+}
+
+# GNU 'coreutils' 5.3.0 broke how 'stat' handled line endings in its output.
+# This was corrected somewhere around 5.92 - 5.94 STABLE.
+# If we detect a version of GNU stat 5.x, we investigate and set MK_STAT_BUG
+# See: https://lists.gnu.org/archive/html/bug-coreutils/2005-12/msg00157.html
+if [ -z "${MK_STAT_BUG+x}" ]; then
+    # We only care about versions in the range [ 5.3.0 .. 5.94 ] (yes different numbering schemes)
+    if stat --version 2>&1 | grep -q "GNU.*5.[3-9]"; then
+        # Convert the version information from semantic versioning to an integer
+        stat_version=$(semver_to_int "$(stat --version 2>&1 | head -n 1)")
+        if [ "${stat_version}" -ge 50300 ] && [ "${stat_version}" -lt 59400 ]; then
+            MK_STAT_BUG="true"
+        else
+            MK_STAT_BUG="false"
+        fi
+        readonly MK_STAT_BUG
+        export MK_STAT_BUG
+    fi
+
+fi
+
+# If MK_STAT_BUG is true, we correct 'stat's behaviour globally
+if [ "${MK_STAT_BUG}" = "true" ]; then
+    stat() {
+        printf -- '%s\n' "$(command stat "${@}")"
+    }
+fi
+
 # Prefer (relatively) new /usr/bin/timeout from coreutils against
 # our shipped waitmax. waitmax is statically linked and crashes on
 # some Ubuntu versions recently.
@@ -299,6 +365,31 @@ section_mem() {
     fi
 }
 
+section_nfs() {
+    # Check NFS mounts by accessing them with stat -f (System call statfs()). 
+    # If this lasts more then 2 seconds we consider it as hanging. We need waitmax.
+    if inpath waitmax; then
+        echo '<<<nfsmounts>>>'
+        get_nfs_mounts | while read -r mountPoint; do
+            waitmax -s 9 5 stat -f -c "${mountPoint} ok %b %f %a %s" "${mountPoint}" \
+            || echo "${mountPoint} hanging 0 0 0 0"
+        done
+
+        echo '<<<cifsmounts>>>'
+        get_cifs_mounts | while read -r mountPoint; do
+            if [ ! -r "${mountPoint}" ]; then
+                echo "${mountPoint} Permission denied"
+            else
+                waitmax -s 9 2 stat -f -c "${mountPoint} ok %b %f %a %s" "${mountPoint}" \
+                    || echo "${mountPoint} hanging 0 0 0 0"
+            fi
+        done
+    fi
+
+    # Clean up our function variables
+    unset mountPoint
+}
+
 section_cpu() {
     if [ "$(uname -m)" = "armv7l" ] || [ "$(uname -m)" = "armv6l" ]; then
         CPU_REGEX='^processor'
@@ -379,7 +470,7 @@ section_df() {
     fi
 }
 
-sections_systemd() {
+section_systemd() {
     if inpath systemctl; then
         echo '<<<systemd_units>>>'
         echo "[list-unit-files]"
@@ -400,38 +491,28 @@ section_zfs() {
 }
 
 section_nfs_mounts() {
+    # Check NFS mounts by accessing them with stat -f (System call statfs()). 
+    # If this lasts more then 2 seconds we consider it as hanging. We need waitmax.
     if inpath waitmax; then
-        STAT_VERSION=$(stat --version | head -1 | cut -d" " -f4)
-        STAT_BROKE="5.3.0"
-
         echo '<<<nfsmounts>>>'
-        sed -n '/ nfs4\? /s/[^ ]* \([^ ]*\) .*/\1/p' </proc/mounts |
-            sed 's/\\040/ /g' |
-            while read -r MP; do
-                if [ "$STAT_VERSION" != "$STAT_BROKE" ]; then
-                    waitmax -s 9 5 stat -f -c "$MP ok %b %f %a %s" "$MP" ||
-                        echo "$MP hanging 0 0 0 0"
-                else
-                    waitmax -s 9 5 stat -f -c "$MP ok %b %f %a %s" "$MP" &&
-                        printf '\n' || echo "$MP hanging 0 0 0 0"
-                fi
-            done
+        get_nfs_mounts | while read -r _mount_point; do
+            waitmax -s 9 5 stat -f -c "${_mount_point} ok %b %f %a %s" "${_mount_point}" ||
+                echo "${_mount_point} hanging 0 0 0 0"
+        done
 
         echo '<<<cifsmounts>>>'
-        sed -n '/ cifs\? /s/[^ ]* \([^ ]*\) .*/\1/p' </proc/mounts |
-            sed 's/\\040/ /g' |
-            while read -r MP; do
-                if [ ! -r "$MP" ]; then
-                    echo "$MP Permission denied"
-                elif [ "$STAT_VERSION" != "$STAT_BROKE" ]; then
-                    waitmax -s 9 2 stat -f -c "$MP ok %b %f %a %s" "$MP" ||
-                        echo "$MP hanging 0 0 0 0"
-                else
-                    waitmax -s 9 2 stat -f -c "$MP ok %b %f %a %s" "$MP" &&
-                        printf '\n' || echo "$MP hanging 0 0 0 0"
-                fi
-            done
+        get_cifs_mounts | while read -r _mount_point; do
+            if [ ! -r "${_mount_point}" ]; then
+                echo "${_mount_point} Permission denied"
+            else
+                waitmax -s 9 2 stat -f -c "${_mount_point} ok %b %f %a %s" "${_mount_point}" ||
+                    echo "${_mount_point} hanging 0 0 0 0"
+            fi
+        done
     fi
+
+    # Clean up our function variables
+    unset -v _mount_point
 }
 
 section_mounts() {
