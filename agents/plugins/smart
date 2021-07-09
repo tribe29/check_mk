@@ -158,7 +158,7 @@ if which smartctl > /dev/null 2>&1 ; then
                 DNAME="${VEND}_${MODEL}_${SN}"
             fi
         else
-            CMD="smartctl -d ata -v 9,raw48 -A $D"
+            CMD="smartctl -d ata -v 9,raw48 -n standby -A $D"
         fi
 
             if [ $VEND == "NVME" ]; then
@@ -187,4 +187,3 @@ if which smartctl > /dev/null 2>&1 ; then
 else
     echo "ERROR: smartctl not found" >&2
 fi
-
